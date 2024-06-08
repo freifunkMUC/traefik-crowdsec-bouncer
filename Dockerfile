@@ -1,5 +1,5 @@
 # 1.17-alpine bug : standard_init_linux.go:228: exec user process caused: no such file or directory
-ARG GOLANG_VERSION=1.17
+ARG GOLANG_VERSION=1.22
 
 # Building custom health checker
 FROM golang:$GOLANG_VERSION as health-build-env
