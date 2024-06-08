@@ -1,4 +1,4 @@
-package controler
+package controller
 
 import (
 	"bytes"
@@ -8,7 +8,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -52,7 +51,7 @@ var client = &http.Client{
 Call Crowdsec local IP and with realIP and return true if IP does NOT have a ban decisions.
 */
 func isIpAuthorized(clientIP string) (bool, error) {
-	// Generating crowdsec API request
+	// Generate Crowdsec API request
 	decisionUrl := url.URL{
 		Scheme:   crowdsecBouncerScheme,
 		Host:     crowdsecBouncerHost,
@@ -67,42 +66,38 @@ func isIpAuthorized(clientIP string) (bool, error) {
 	log.Debug().
 		Str("method", http.MethodGet).
 		Str("url", decisionUrl.String()).
-		Msg("Request Crowdsec's decision Local API")
+		Msg("Requesting Crowdsec's decision Local API")
 
-	// Calling crowdsec API
+	// Call Crowdsec API
 	resp, err := client.Do(req)
 	if err != nil {
 		return false, err
 	}
+	defer resp.Body.Close()
+
 	if resp.StatusCode == http.StatusForbidden {
-		return false, err
+		return false, nil
 	}
 
-	// Parsing response
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			log.Err(err).Msg("An error occurred while closing body reader")
-		}
-	}(resp.Body)
-	reqBody, err := ioutil.ReadAll(resp.Body)
+	// Parse response
+	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return false, err
 	}
-	if bytes.Equal(reqBody, []byte("null")) {
+	if bytes.Equal(respBody, []byte("null")) {
 		log.Debug().Msgf("No decision for IP %q. Accepting", clientIP)
 		return true, nil
 	}
 
-	log.Debug().RawJSON("decisions", reqBody).Msg("Found Crowdsec's decision(s), evaluating ...")
+	log.Debug().RawJSON("decisions", respBody).Msg("Found Crowdsec's decision(s), evaluating ...")
 	var decisions []model.Decision
-	err = json.Unmarshal(reqBody, &decisions)
+	err = json.Unmarshal(respBody, &decisions)
 	if err != nil {
 		return false, err
 	}
 
 	// Authorization logic
-	return len(decisions) < 0, nil
+	return len(decisions) == 0, nil
 }
 
 /*

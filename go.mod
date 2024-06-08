@@ -1,6 +1,8 @@
 module github.com/fbonalair/traefik-crowdsec-bouncer
 
-go 1.22
+go 1.21
+
+toolchain go1.22.2
 
 require (
 	github.com/gin-contrib/logger v1.1.2
@@ -52,4 +54,4 @@ replace github.com/fbonalair/traefik-crowdsec-bouncer/config => ../config
 
 replace github.com/fbonalair/traefik-crowdsec-bouncer/model => ../model
 
-replace github.com/fbonalair/traefik-crowdsec-bouncer/controler => ../controler
+replace github.com/fbonalair/traefik-crowdsec-bouncer/controller => ../controller

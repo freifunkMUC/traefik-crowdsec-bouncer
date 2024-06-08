@@ -4,7 +4,7 @@ import (
 	"os"
 
 	. "github.com/fbonalair/traefik-crowdsec-bouncer/config"
-	"github.com/fbonalair/traefik-crowdsec-bouncer/controler"
+	"github.com/fbonalair/traefik-crowdsec-bouncer/controller"
 	"github.com/gin-contrib/logger"
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
@@ -58,9 +58,9 @@ func setupRouter() (*gin.Engine, error) {
 	router.Use(logger.SetLogger(
 		logger.WithSkipPath([]string{"/api/v1/ping", "/api/v1/healthz"}),
 	))
-	router.GET("/api/v1/ping", controler.Ping)
-	router.GET("/api/v1/healthz", controler.Healthz)
-	router.GET("/api/v1/forwardAuth", controler.ForwardAuth)
-	router.GET("/api/v1/metrics", controler.Metrics)
+	router.GET("/api/v1/ping", controller.Ping)
+	router.GET("/api/v1/healthz", controller.Healthz)
+	router.GET("/api/v1/forwardAuth", controller.ForwardAuth)
+	router.GET("/api/v1/metrics", controller.Metrics)
 	return router, nil
 }
