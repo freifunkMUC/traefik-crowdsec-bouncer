@@ -70,23 +70,3 @@ func TestForwardAuthValidIp(t *testing.T) {
 
 	assert.Equal(t, 200, w.Code)
 }
-
-/**
-FIXME Since we are using var in module, they are loaded before tests. So changing their values with environment variables have no effect.
-*/
-func testForwardAuthBannedIpCustomResponse(t *testing.T) {
-	// Setup
-	expectedResponseMsg := "Not Found"
-	t.Setenv("CROWDSEC_BOUNCER_BAN_RESPONSE_CODE", "404")
-	t.Setenv("CROWDSEC_BOUNCER_BAN_RESPONSE_MSG", expectedResponseMsg)
-
-	router, _ := setupRouter()
-
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/v1/forwardAuth", nil)
-	req.RemoteAddr = "1.2.3.4:48328"
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, 404, w.Code)
-	assert.Equal(t, expectedResponseMsg, w.Body.String())
-}
