@@ -1,8 +1,5 @@
-# 1.17-alpine bug : standard_init_linux.go:228: exec user process caused: no such file or directory
-ARG GOLANG_VERSION=1.22
-
 # Building custom health checker
-FROM golang:$GOLANG_VERSION as health-build-env
+FROM golang:1.23.0-bookworm as health-build-env
 
 # Copying source
 WORKDIR /go/src/app
@@ -15,7 +12,7 @@ RUN go get -d -v ./...
 RUN go build -o /go/bin/healthchecker
 
 # Building bouncer
-FROM golang:$GOLANG_VERSION as build-env
+FROM golang:1.23.0-bookworm as build-env
 
 # Copying source
 WORKDIR /go/src/app
