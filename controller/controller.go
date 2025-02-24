@@ -4,14 +4,17 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
+	"strings"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	. "github.com/fbonalair/traefik-crowdsec-bouncer/config"
 	"github.com/fbonalair/traefik-crowdsec-bouncer/model"
@@ -32,6 +35,7 @@ var crowdsecBouncerHost = RequiredEnv("CROWDSEC_AGENT_HOST")
 var crowdsecBouncerScheme = OptionalEnv("CROWDSEC_BOUNCER_SCHEME", "http")
 var crowdsecBanResponseCode, _ = strconv.Atoi(OptionalEnv("CROWDSEC_BOUNCER_BAN_RESPONSE_CODE", "403")) // Validated via ValidateEnv()
 var crowdsecBanResponseMsg = OptionalEnv("CROWDSEC_BOUNCER_BAN_RESPONSE_MSG", "Forbidden")
+var crowdsecBanResponseFile = OptionalEnv("CROWDSEC_BOUNCER_BAN_RESPONSE_FILE", "")
 var (
 	ipProcessed = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "crowdsec_traefik_bouncer_processed_ip_total",
@@ -47,7 +51,25 @@ var client = &http.Client{
 	Timeout: 5 * time.Second,
 }
 
-/**
+/*
+*
+Check whether HTML output is desired and include the HTML file
+*/
+func handleBanResponse(c *gin.Context) {
+	if crowdsecBanResponseFile != "" {
+		if fileContent, err := os.ReadFile(crowdsecBanResponseFile); err == nil {
+			if strings.HasSuffix(crowdsecBanResponseFile, ".html") {
+				c.Data(http.StatusForbidden, "text/html", fileContent)
+				return
+			}
+		}
+	}
+	// Fallback
+	c.String(crowdsecBanResponseCode, crowdsecBanResponseMsg)
+}
+
+/*
+*
 Call Crowdsec local IP and with realIP and return true if IP does NOT have a ban decisions.
 */
 func isIpAuthorized(clientIP string) (bool, error) {
@@ -101,7 +123,7 @@ func isIpAuthorized(clientIP string) (bool, error) {
 }
 
 /*
-	Main route used by Traefik to verify authorization for a request
+Main route used by Traefik to verify authorization for a request
 */
 func ForwardAuth(c *gin.Context) {
 	ipProcessed.Inc()
@@ -118,16 +140,16 @@ func ForwardAuth(c *gin.Context) {
 	isAuthorized, err := isIpAuthorized(clientIP)
 	if err != nil {
 		log.Warn().Err(err).Msgf("An error occurred while checking IP %q", c.Request.Header.Get(clientIP))
-		c.String(crowdsecBanResponseCode, crowdsecBanResponseMsg)
+		handleBanResponse(c)
 	} else if !isAuthorized {
-		c.String(crowdsecBanResponseCode, crowdsecBanResponseMsg)
+		handleBanResponse(c)
 	} else {
 		c.Status(http.StatusOK)
 	}
 }
 
 /*
-	Route to check bouncer connectivity with Crowdsec agent. Mainly use for Kubernetes readiness probe
+Route to check bouncer connectivity with Crowdsec agent. Mainly use for Kubernetes readiness probe
 */
 func Healthz(c *gin.Context) {
 	isHealthy, err := isIpAuthorized(healthCheckIp)
@@ -140,7 +162,7 @@ func Healthz(c *gin.Context) {
 }
 
 /*
-	Simple route responding pong to every request. Mainly use for Kubernetes liveliness probe
+Simple route responding pong to every request. Mainly use for Kubernetes liveliness probe
 */
 func Ping(c *gin.Context) {
 	c.String(http.StatusOK, "pong")

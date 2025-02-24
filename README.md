@@ -63,6 +63,7 @@ The web service configuration is managed via environment variables:
 * `CROWDSEC_BOUNCER_LOG_LEVEL`          - Minimum log level for the bouncer. Expected values: [zerolog levels](https://pkg.go.dev/github.com/rs/zerolog#readme-leveled-logging). Defaults to 1
 * `CROWDSEC_BOUNCER_BAN_RESPONSE_CODE`  - HTTP code to respond in case of a ban. Defaults to 403
 * `CROWDSEC_BOUNCER_BAN_RESPONSE_MSG`   - HTTP body message to respond in case of a ban. Defaults to "Forbidden"
+* `CROWDSEC_BOUNCER_BAN_RESPONSE_FILE`  - HTTP-File to respond in case of a ban. file should be included via volume and the absolute path should be used.
 * `HEALTH_CHECKER_TIMEOUT_DURATION`     - [Golang string representation of a duration](https://pkg.go.dev/time#ParseDuration) to wait for the bouncer's answer before failing the health check. Defaults to 2s
 * `PORT`                                - Change the listening port of the web server. Defaults to 8080
 * `GIN_MODE`                            - By default, runs the app in "debug" mode. Set it to "release" in production
