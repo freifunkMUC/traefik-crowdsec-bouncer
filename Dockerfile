@@ -1,5 +1,5 @@
 # Building custom health checker
-FROM golang:1.24.0-bookworm AS health-build-env
+FROM golang:1.24.1-bookworm AS health-build-env
 
 
 # Copying source
@@ -13,7 +13,7 @@ RUN go get -d -v ./...
 RUN go build -o /go/bin/healthchecker
 
 # Building bouncer
-FROM golang:1.24.0-bookworm AS build-env
+FROM golang:1.24.1-bookworm AS build-env
 
 
 # Copying source
