@@ -16,7 +16,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	. "github.com/fbonalair/traefik-crowdsec-bouncer/config"
+	"github.com/fbonalair/traefik-crowdsec-bouncer/config"
 	"github.com/fbonalair/traefik-crowdsec-bouncer/model"
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog/log"
@@ -30,12 +30,12 @@ const (
 	healthCheckIp        = "127.0.0.1"
 )
 
-var crowdsecBouncerApiKey = RequiredEnv("CROWDSEC_BOUNCER_API_KEY")
-var crowdsecBouncerHost = RequiredEnv("CROWDSEC_AGENT_HOST")
-var crowdsecBouncerScheme = OptionalEnv("CROWDSEC_BOUNCER_SCHEME", "http")
-var crowdsecBanResponseCode, _ = strconv.Atoi(OptionalEnv("CROWDSEC_BOUNCER_BAN_RESPONSE_CODE", "403")) // Validated via ValidateEnv()
-var crowdsecBanResponseMsg = OptionalEnv("CROWDSEC_BOUNCER_BAN_RESPONSE_MSG", "Forbidden")
-var crowdsecBanResponseFile = OptionalEnv("CROWDSEC_BOUNCER_BAN_RESPONSE_FILE", "")
+var crowdsecBouncerApiKey = config.RequiredEnv("CROWDSEC_BOUNCER_API_KEY")
+var crowdsecBouncerHost = config.RequiredEnv("CROWDSEC_AGENT_HOST")
+var crowdsecBouncerScheme = config.OptionalEnv("CROWDSEC_BOUNCER_SCHEME", "http")
+var crowdsecBanResponseCode, _ = strconv.Atoi(config.OptionalEnv("CROWDSEC_BOUNCER_BAN_RESPONSE_CODE", "403")) // Validated via ValidateEnv()
+var crowdsecBanResponseMsg = config.OptionalEnv("CROWDSEC_BOUNCER_BAN_RESPONSE_MSG", "Forbidden")
+var crowdsecBanResponseFile = config.OptionalEnv("CROWDSEC_BOUNCER_BAN_RESPONSE_FILE", "")
 var (
 	ipProcessed = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "crowdsec_traefik_bouncer_processed_ip_total",
@@ -95,7 +95,12 @@ func isIpAuthorized(clientIP string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer resp.Body.Close()
+
+	defer func() {
+		if cerr := resp.Body.Close(); cerr != nil {
+			log.Printf("error closing response body: %v", cerr)
+		}
+	}()
 
 	if resp.StatusCode == http.StatusForbidden {
 		return false, nil
@@ -139,7 +144,7 @@ func ForwardAuth(c *gin.Context) {
 	// Getting and verifying ip using ClientIP function
 	isAuthorized, err := isIpAuthorized(clientIP)
 	if err != nil {
-		log.Warn().Err(err).Msgf("An error occurred while checking IP %q", c.Request.Header.Get(clientIP))
+		log.Warn().Err(err).Msgf("An error occurred while checking IP %q", clientIP)
 		handleBanResponse(c)
 	} else if !isAuthorized {
 		handleBanResponse(c)

@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	. "github.com/fbonalair/traefik-crowdsec-bouncer/config"
+	"github.com/fbonalair/traefik-crowdsec-bouncer/config"
 	"github.com/fbonalair/traefik-crowdsec-bouncer/controller"
 	"github.com/gin-contrib/logger"
 	"github.com/gin-gonic/gin"
@@ -12,11 +12,11 @@ import (
 	"strings"
 )
 
-var logLevel = OptionalEnv("CROWDSEC_BOUNCER_LOG_LEVEL", "1")
-var trustedProxiesList = strings.Split(OptionalEnv("TRUSTED_PROXIES", "0.0.0.0/0"), ",")
+var logLevel = config.OptionalEnv("CROWDSEC_BOUNCER_LOG_LEVEL", "1")
+var trustedProxiesList = strings.Split(config.OptionalEnv("TRUSTED_PROXIES", "0.0.0.0/0"), ",")
 
 func main() {
-	ValidateEnv()
+	config.ValidateEnv()
 	router, err := setupRouter()
 	if err != nil {
 		log.Fatal().Err(err).Msgf("An error occurred while starting webserver")
@@ -51,8 +51,7 @@ func setupRouter() (*gin.Engine, error) {
 
 	// Web framework
 	router := gin.New()
-	err = router.SetTrustedProxies(trustedProxiesList)
-	if err != nil {
+	if err := router.SetTrustedProxies(trustedProxiesList); err != nil {
 		return nil, err
 	}
 	router.Use(logger.SetLogger(
