@@ -1,4 +1,3 @@
-
 ![GitHub](https://img.shields.io/github/license/fbonalair/traefik-crowdsec-bouncer)
 ![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/fbonalair/traefik-crowdsec-bouncer)
 [![Go Report Card](https://goreportcard.com/badge/github.com/fbonalair/traefik-crowdsec-bouncer)](https://goreportcard.com/report/github.com/fbonalair/traefik-crowdsec-bouncer)
@@ -17,7 +16,7 @@ This repository aims to implement a [CrowdSec](https://doc.crowdsec.net/) bounce
 
 # Demo
 
-## Prerequisites 
+## Prerequisites
 
 Ensure [Docker](https://docs.docker.com/get-docker/) and [Docker-compose](https://docs.docker.com/compose/install/) are installed. You can use the docker-compose file in the examples folder as a starting point. Through Traefik, it exposes the whoami container on port 80, with the bouncer accepting and rejecting client IPs.
 
@@ -26,7 +25,7 @@ Launch all services except the bouncer with the following commands:
 ```bash
 git clone https://github.com/fbonalair/traefik-crowdsec-bouncer.git && \
   cd traefik-crowdsec-bouncer/examples && \
-  docker-compose up -d traefik crowdsec whoami 
+  docker-compose up -d traefik crowdsec whoami
 ```
 
 ## Procedure
@@ -41,7 +40,7 @@ git clone https://github.com/fbonalair/traefik-crowdsec-bouncer.git && \
 7. Visit <http://localhost/> again. In your browser, you will see "Forbidden" since you have been banned.
    In the console, you will see "status": 403.
 8. Unban yourself with `docker exec crowdsec-example cscli decisions delete --ip 192.168.128.1`
-9. Visit <http://localhost/> one last time. You will have access to the container whoami.  
+9. Visit <http://localhost/> one last time. You will have access to the container whoami.
 
 Enjoy!
 
@@ -57,32 +56,32 @@ You should have Traefik v2 and a CrowdSec instance running. The container is ava
 
 The web service configuration is managed via environment variables:
 
-* `CROWDSEC_BOUNCER_API_KEY`            - CrowdSec bouncer API key required to authorize requests to the local API (required)
-* `CROWDSEC_AGENT_HOST`                 - Host and port of the CrowdSec agent, e.g., crowdsec-agent:8080 (required)
-* `CROWDSEC_BOUNCER_SCHEME`             - Scheme to query the CrowdSec agent. Expected values: http, https. Defaults to http
-* `CROWDSEC_BOUNCER_LOG_LEVEL`          - Minimum log level for the bouncer. Expected values: [zerolog levels](https://pkg.go.dev/github.com/rs/zerolog#readme-leveled-logging). Defaults to 1
-* `CROWDSEC_BOUNCER_BAN_RESPONSE_CODE`  - HTTP code to respond in case of a ban. Defaults to 403
-* `CROWDSEC_BOUNCER_BAN_RESPONSE_MSG`   - HTTP body message to respond in case of a ban. Defaults to "Forbidden"
-* `CROWDSEC_BOUNCER_BAN_RESPONSE_FILE`  - HTTP-File to respond in case of a ban. file should be included via volume and the absolute path should be used.
-* `HEALTH_CHECKER_TIMEOUT_DURATION`     - [Golang string representation of a duration](https://pkg.go.dev/time#ParseDuration) to wait for the bouncer's answer before failing the health check. Defaults to 2s
-* `PORT`                                - Change the listening port of the web server. Defaults to 8080
-* `GIN_MODE`                            - By default, runs the app in "debug" mode. Set it to "release" in production
-* `TRUSTED_PROXIES`                     - List of trusted proxies' IP addresses in CIDR format, delimited by commas. Default is 0.0.0.0/0, which should be fine for most use cases, but you MUST add them directly in Traefik. 
+- `CROWDSEC_BOUNCER_API_KEY` - CrowdSec bouncer API key required to authorize requests to the local API (required)
+- `CROWDSEC_AGENT_HOST` - Host and port of the CrowdSec agent, e.g., crowdsec-agent:8080 (required)
+- `CROWDSEC_BOUNCER_SCHEME` - Scheme to query the CrowdSec agent. Expected values: http, https. Defaults to http
+- `CROWDSEC_BOUNCER_LOG_LEVEL` - Minimum log level for the bouncer. Expected values: [zerolog levels](https://pkg.go.dev/github.com/rs/zerolog#readme-leveled-logging). Defaults to 1
+- `CROWDSEC_BOUNCER_BAN_RESPONSE_CODE` - HTTP code to respond in case of a ban. Defaults to 403
+- `CROWDSEC_BOUNCER_BAN_RESPONSE_MSG` - HTTP body message to respond in case of a ban. Defaults to "Forbidden"
+- `CROWDSEC_BOUNCER_BAN_RESPONSE_FILE` - HTTP-File to respond in case of a ban. file should be included via volume and the absolute path should be used.
+- `HEALTH_CHECKER_TIMEOUT_DURATION` - [Golang string representation of a duration](https://pkg.go.dev/time#ParseDuration) to wait for the bouncer's answer before failing the health check. Defaults to 2s
+- `PORT` - Change the listening port of the web server. Defaults to 8080
+- `GIN_MODE` - By default, runs the app in "debug" mode. Set it to "release" in production
+- `TRUSTED_PROXIES` - List of trusted proxies' IP addresses in CIDR format, delimited by commas. Default is 0.0.0.0/0, which should be fine for most use cases, but you MUST add them directly in Traefik.
 
 ## Exposed Routes
 
 The web service exposes the following routes:
 
-* GET `/api/v1/forwardAuth`             - Main route to be used by Traefik: queries the CrowdSec agent with the header `X-Real-Ip` as the client IP
-* GET `/api/v1/ping`                    - Simple health route that responds with "pong" and HTTP 200
-* GET `/api/v1/healthz`                 - Another health route that queries the CrowdSec agent with localhost (127.0.0.1)
-* GET `/api/v1/metrics`                 - Prometheus route to scrape metrics
+- GET `/api/v1/forwardAuth` - Main route to be used by Traefik: queries the CrowdSec agent with the header `X-Real-Ip` as the client IP
+- GET `/api/v1/ping` - Simple health route that responds with "pong" and HTTP 200
+- GET `/api/v1/healthz` - Another health route that queries the CrowdSec agent with localhost (127.0.0.1)
+- GET `/api/v1/metrics` - Prometheus route to scrape metrics
 
 # Contribution
 
-Any constructive feedback is welcome. Feel free to add an issue or a pull request. I will review it and integrate it into the code.    
+Any constructive feedback is welcome. Feel free to add an issue or a pull request. I will review it and integrate it into the code.
 
-## Local Setup 
+## Local Setup
 
 1. Start docker-compose with `docker-compose up -d`
 2. Create `_test.env` from the template `_test.env.example` with the command `cp _test.env.example _test.env`

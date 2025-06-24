@@ -2,10 +2,10 @@ version: "3.8"
 
 services:
   traefik:
-    image: traefik:v2.5
+    image: traefik:v3
     container_name: "traefik-example"
     command:
-#      - "--log.level=DEBUG"
+      #      - "--log.level=DEBUG"
       - "--api.insecure=true"
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
@@ -29,13 +29,13 @@ services:
       - "traefik.http.routers.whoami.middlewares=crowdsec-bouncer@docker"
 
   crowdsec:
-    image: crowdsecurity/crowdsec:v1.2.0
+    image: crowdsecurity/crowdsec:v1.6.9
     container_name: "crowdsec-example"
     environment:
       COLLECTIONS: "crowdsecurity/nginx"
       GID: "${GID-1000}"
     depends_on:
-      - 'traefik'
+      - "traefik"
     volumes:
       - crowdsec-db-example:/var/lib/crowdsec/data/
       - crowdsec-config-example:/etc/crowdsec/
