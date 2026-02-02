@@ -60,6 +60,7 @@ func getConfig() controllerConfig {
 
 	return cfg
 }
+
 var (
 	ipProcessed = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "crowdsec_traefik_bouncer_processed_ip_total",
