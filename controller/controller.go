@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -30,12 +31,35 @@ const (
 	healthCheckIp        = "127.0.0.1"
 )
 
-var crowdsecBouncerApiKey = config.RequiredEnv("CROWDSEC_BOUNCER_API_KEY")
-var crowdsecBouncerHost = config.RequiredEnv("CROWDSEC_AGENT_HOST")
-var crowdsecBouncerScheme = config.OptionalEnv("CROWDSEC_BOUNCER_SCHEME", "http")
-var crowdsecBanResponseCode, _ = strconv.Atoi(config.OptionalEnv("CROWDSEC_BOUNCER_BAN_RESPONSE_CODE", "403")) // Validated via ValidateEnv()
-var crowdsecBanResponseMsg = config.OptionalEnv("CROWDSEC_BOUNCER_BAN_RESPONSE_MSG", "Forbidden")
-var crowdsecBanResponseFile = config.OptionalEnv("CROWDSEC_BOUNCER_BAN_RESPONSE_FILE", "")
+type controllerConfig struct {
+	apiKey          string
+	host            string
+	scheme          string
+	banResponseCode int
+	banResponseMsg  string
+	banResponseFile string
+}
+
+var cfg controllerConfig
+var cfgOnce sync.Once
+
+func getConfig() controllerConfig {
+	cfgOnce.Do(func() {
+		cfg.apiKey = config.RequiredEnv("CROWDSEC_BOUNCER_API_KEY")
+		cfg.host = config.RequiredEnv("CROWDSEC_AGENT_HOST")
+		cfg.scheme = config.OptionalEnv("CROWDSEC_BOUNCER_SCHEME", "http")
+		cfg.banResponseMsg = config.OptionalEnv("CROWDSEC_BOUNCER_BAN_RESPONSE_MSG", "Forbidden")
+		cfg.banResponseFile = config.OptionalEnv("CROWDSEC_BOUNCER_BAN_RESPONSE_FILE", "")
+		banResponseCode := config.OptionalEnv("CROWDSEC_BOUNCER_BAN_RESPONSE_CODE", "403")
+		parsedCode, err := strconv.Atoi(banResponseCode)
+		if err != nil {
+			log.Fatal().Err(err).Msgf("The value for env var %s is not an int. It should be a valid http response code.", "CROWDSEC_BOUNCER_BAN_RESPONSE_CODE")
+		}
+		cfg.banResponseCode = parsedCode
+	})
+
+	return cfg
+}
 var (
 	ipProcessed = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "crowdsec_traefik_bouncer_processed_ip_total",
@@ -56,16 +80,17 @@ var client = &http.Client{
 Check whether HTML output is desired and include the HTML file
 */
 func handleBanResponse(c *gin.Context) {
-	if crowdsecBanResponseFile != "" {
-		if fileContent, err := os.ReadFile(crowdsecBanResponseFile); err == nil {
-			if strings.HasSuffix(crowdsecBanResponseFile, ".html") {
+	config := getConfig()
+	if config.banResponseFile != "" {
+		if fileContent, err := os.ReadFile(config.banResponseFile); err == nil {
+			if strings.HasSuffix(config.banResponseFile, ".html") {
 				c.Data(http.StatusForbidden, "text/html", fileContent)
 				return
 			}
 		}
 	}
 	// Fallback
-	c.String(crowdsecBanResponseCode, crowdsecBanResponseMsg)
+	c.String(config.banResponseCode, config.banResponseMsg)
 }
 
 /*
@@ -73,10 +98,11 @@ func handleBanResponse(c *gin.Context) {
 Call Crowdsec local IP and with realIP and return true if IP does NOT have a ban decisions.
 */
 func isIpAuthorized(clientIP string) (bool, error) {
+	config := getConfig()
 	// Generate Crowdsec API request
 	decisionUrl := url.URL{
-		Scheme:   crowdsecBouncerScheme,
-		Host:     crowdsecBouncerHost,
+		Scheme:   config.scheme,
+		Host:     config.host,
 		Path:     crowdsecBouncerRoute,
 		RawQuery: fmt.Sprintf("type=ban&ip=%s", clientIP),
 	}
@@ -84,7 +110,7 @@ func isIpAuthorized(clientIP string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	req.Header.Add(crowdsecAuthHeader, crowdsecBouncerApiKey)
+	req.Header.Add(crowdsecAuthHeader, config.apiKey)
 	log.Debug().
 		Str("method", http.MethodGet).
 		Str("url", decisionUrl.String()).
