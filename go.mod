@@ -6,7 +6,7 @@ require (
 	github.com/gin-contrib/logger v1.2.6
 	github.com/gin-gonic/gin v1.12.0
 	github.com/prometheus/client_golang v1.23.2
-	github.com/rs/zerolog v1.34.0
+	github.com/rs/zerolog v1.35.0
 	github.com/stretchr/testify v1.11.1
 )
 
