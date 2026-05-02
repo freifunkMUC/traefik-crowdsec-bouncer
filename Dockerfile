@@ -1,5 +1,5 @@
 # Building custom health checker
-FROM golang:1.26.1-trixie AS health-build-env
+FROM golang:1.26.2-trixie AS health-build-env
 
 
 # Copying source
@@ -13,7 +13,7 @@ RUN go get -d -v ./...
 RUN go build -o /go/bin/healthchecker
 
 # Building bouncer
-FROM golang:1.26.1-trixie AS build-env
+FROM golang:1.26.2-trixie AS build-env
 
 
 # Copying source
