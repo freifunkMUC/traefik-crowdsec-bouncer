@@ -1,5 +1,5 @@
 # Building custom health checker
-FROM golang:1.26.4-trixie AS health-build-env
+FROM golang:1.26.4-trixie@sha256:68b7145ec43d1820b9a56704554b53d1520aa2a15cb5233e374188a31b2a1bce AS health-build-env
 
 
 # Copying source
@@ -9,10 +9,10 @@ RUN go mod download
 COPY ./healthcheck /go/src/app
 
 # Compiling
-RUN go build -o /go/bin/healthchecker
+RUN CGO_ENABLED=0 go build -o /go/bin/healthchecker
 
 # Building bouncer
-FROM golang:1.26.4-trixie AS build-env
+FROM golang:1.26.4-trixie@sha256:68b7145ec43d1820b9a56704554b53d1520aa2a15cb5233e374188a31b2a1bce AS build-env
 
 
 # Copying source
@@ -22,9 +22,9 @@ RUN go mod download
 COPY . /go/src/app
 
 # Compiling
-RUN go build -o /go/bin/app
+RUN CGO_ENABLED=0 go build -o /go/bin/app
 
-FROM gcr.io/distroless/base:nonroot
+FROM gcr.io/distroless/static:nonroot@sha256:f7f8f729987ad0fdf6b05eeeae94b26e6a0f613bdf46feea7fc40f7bd72953e6
 COPY --from=health-build-env --chown=nonroot:nonroot /go/bin/healthchecker /
 COPY --from=build-env --chown=nonroot:nonroot /go/bin/app /
 

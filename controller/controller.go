@@ -2,6 +2,7 @@ package controller
 
 import (
 	"bytes"
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
@@ -70,6 +71,10 @@ var (
 		Name: "crowdsec_traefik_bouncer_processed_ip_total",
 		Help: "The total number of processed IP",
 	})
+	lookupErrors = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "crowdsec_traefik_bouncer_lookup_error_total",
+		Help: "The total number of forwardAuth requests that were denied because the CrowdSec decision lookup itself failed (e.g. LAPI unreachable), as opposed to an actual ban decision",
+	})
 )
 
 var client = &http.Client{
@@ -102,7 +107,7 @@ func handleBanResponse(c *gin.Context) {
 *
 Call Crowdsec local IP and with realIP and return true if IP does NOT have a ban decisions.
 */
-func isIpAuthorized(clientIP string) (bool, error) {
+func isIpAuthorized(ctx context.Context, clientIP string) (bool, error) {
 	config := getConfig()
 	// Generate Crowdsec API request
 	decisionUrl := url.URL{
@@ -111,7 +116,7 @@ func isIpAuthorized(clientIP string) (bool, error) {
 		Path:     crowdsecBouncerRoute,
 		RawQuery: fmt.Sprintf("type=ban&ip=%s", clientIP),
 	}
-	req, err := http.NewRequest(http.MethodGet, decisionUrl.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, decisionUrl.String(), nil)
 	if err != nil {
 		return false, err
 	}
@@ -194,8 +199,9 @@ func ForwardAuth(c *gin.Context) {
 		Msg("Handling forwardAuth request")
 
 	// Getting and verifying ip using ClientIP function
-	isAuthorized, err := isIpAuthorized(clientIP)
+	isAuthorized, err := isIpAuthorized(c.Request.Context(), clientIP)
 	if err != nil {
+		lookupErrors.Inc()
 		log.Warn().Err(err).Msgf("An error occurred while checking IP %q", clientIP)
 		handleBanResponse(c)
 	} else if !isAuthorized {
@@ -209,7 +215,7 @@ func ForwardAuth(c *gin.Context) {
 Route to check bouncer connectivity with Crowdsec agent. Mainly use for Kubernetes readiness probe
 */
 func Healthz(c *gin.Context) {
-	isHealthy, err := isIpAuthorized(healthCheckIp)
+	isHealthy, err := isIpAuthorized(c.Request.Context(), healthCheckIp)
 	if err != nil || !isHealthy {
 		log.Warn().Err(err).Msgf("The health check did not pass. Check error if present and if the IP %q is authorized", healthCheckIp)
 		c.Status(http.StatusForbidden)

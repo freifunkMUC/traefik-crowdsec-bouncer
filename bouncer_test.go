@@ -22,6 +22,12 @@ func TestMain(m *testing.M) {
 			_, _ = w.Write([]byte("null"))
 			return
 		}
+		if ip == "9.9.9.9" {
+			// Simulate a broken/unexpected CrowdSec LAPI response to exercise the lookup-error path.
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte("boom"))
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`[{"type":"ban"}]`))
 	}))
@@ -122,4 +128,23 @@ func TestForwardAuthRejectsWrongSecret(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, 403, w.Code)
+}
+
+func TestForwardAuthLookupErrorIncrementsMetric(t *testing.T) {
+	router, _ := setupRouter()
+
+	metricsReq, _ := http.NewRequest("GET", "/api/v1/metrics", nil)
+	metricsBefore := httptest.NewRecorder()
+	router.ServeHTTP(metricsBefore, metricsReq)
+	assert.Contains(t, metricsBefore.Body.String(), "crowdsec_traefik_bouncer_lookup_error_total 0")
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/forwardAuth?secret=test-secret", nil)
+	req.RemoteAddr = "9.9.9.9:48328"
+	router.ServeHTTP(w, req)
+	assert.Equal(t, 403, w.Code)
+
+	metricsAfter := httptest.NewRecorder()
+	router.ServeHTTP(metricsAfter, metricsReq)
+	assert.Contains(t, metricsAfter.Body.String(), "crowdsec_traefik_bouncer_lookup_error_total 1")
 }

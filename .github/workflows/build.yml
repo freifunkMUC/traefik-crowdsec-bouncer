@@ -15,6 +15,9 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -60,3 +63,21 @@ jobs:
 
       - name: Inspect Docker image
         run: docker image inspect ${{ steps.meta.outputs.tags }}
+
+      - name: Pick a single image tag to scan
+        id: scan_tag
+        run: echo "tag=$(head -n1 <<< '${{ steps.meta.outputs.tags }}')" >> "$GITHUB_OUTPUT"
+
+      - name: Scan image for known vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.scan_tag.outputs.tag }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@c10b8064de6f491fea524254123dbe5e09572f13 #v4.35.1
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif

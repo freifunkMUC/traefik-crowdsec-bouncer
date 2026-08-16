@@ -87,6 +87,8 @@ Because of this:
 
    Requests without the correct secret are rejected before the CrowdSec decision lookup even happens, so a spoofed `X-Forwarded-For` alone is no longer enough to bypass a ban if the bouncer's port is accidentally reachable.
 
+`/api/v1/metrics` has the same exposure concern as `/api/v1/forwardAuth`: it isn't authenticated, so it shouldn't be reachable beyond whatever scrapes it (e.g. Prometheus) either.
+
 ## Exposed Routes
 
 The web service exposes the following routes:
@@ -94,7 +96,7 @@ The web service exposes the following routes:
 - GET `/api/v1/forwardAuth` - Main route to be used by Traefik: queries the CrowdSec agent with the header `X-Real-Ip` as the client IP
 - GET `/api/v1/ping` - Simple health route that responds with "pong" and HTTP 200
 - GET `/api/v1/healthz` - Another health route that queries the CrowdSec agent with localhost (127.0.0.1)
-- GET `/api/v1/metrics` - Prometheus route to scrape metrics
+- GET `/api/v1/metrics` - Prometheus route to scrape metrics. Exposes `crowdsec_traefik_bouncer_processed_ip_total` and `crowdsec_traefik_bouncer_lookup_error_total` (requests denied because the CrowdSec lookup itself failed, e.g. LAPI unreachable — distinct from an actual ban, useful for alerting on fail-closed outages)
 
 # Contribution
 
