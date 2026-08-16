@@ -31,7 +31,7 @@ const (
 	crowdsecAuthHeader    = "X-Api-Key"
 	crowdsecBouncerRoute  = "v1/decisions"
 	healthCheckIp         = "127.0.0.1"
-	forwardAuthSecretParm = "secret"
+	forwardAuthSecretParam = "secret"
 )
 
 type controllerConfig struct {
@@ -174,7 +174,7 @@ func isForwardAuthSecretValid(c *gin.Context) bool {
 	if expected == "" {
 		return true
 	}
-	provided := c.Query(forwardAuthSecretParm)
+	provided := c.Query(forwardAuthSecretParam)
 	return subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) == 1
 }
 
