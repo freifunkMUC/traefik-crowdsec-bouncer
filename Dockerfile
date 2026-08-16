@@ -4,10 +4,9 @@ FROM golang:1.26.4-trixie AS health-build-env
 
 # Copying source
 WORKDIR /go/src/app
+COPY ./healthcheck/go.mod ./healthcheck/go.sum* ./
+RUN go mod download
 COPY ./healthcheck /go/src/app
-
-# Installing dependencies
-RUN go get -d -v ./...
 
 # Compiling
 RUN go build -o /go/bin/healthchecker
@@ -18,10 +17,9 @@ FROM golang:1.26.4-trixie AS build-env
 
 # Copying source
 WORKDIR /go/src/app
+COPY go.mod go.sum ./
+RUN go mod download
 COPY . /go/src/app
-
-# Installing dependencies
-RUN go get -d -v ./...
 
 # Compiling
 RUN go build -o /go/bin/app

@@ -2,6 +2,7 @@ package controller
 
 import (
 	"bytes"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -24,20 +25,22 @@ import (
 )
 
 const (
-	realIpHeader         = "X-Real-Ip"
-	forwardHeader        = "X-Forwarded-For"
-	crowdsecAuthHeader   = "X-Api-Key"
-	crowdsecBouncerRoute = "v1/decisions"
-	healthCheckIp        = "127.0.0.1"
+	realIpHeader          = "X-Real-Ip"
+	forwardHeader         = "X-Forwarded-For"
+	crowdsecAuthHeader    = "X-Api-Key"
+	crowdsecBouncerRoute  = "v1/decisions"
+	healthCheckIp         = "127.0.0.1"
+	forwardAuthSecretParm = "secret"
 )
 
 type controllerConfig struct {
-	apiKey          string
-	host            string
-	scheme          string
-	banResponseCode int
-	banResponseMsg  string
-	banResponseFile string
+	apiKey            string
+	host              string
+	scheme            string
+	banResponseCode   int
+	banResponseMsg    string
+	banResponseFile   string
+	forwardAuthSecret string
 }
 
 var cfg controllerConfig
@@ -50,6 +53,7 @@ func getConfig() controllerConfig {
 		cfg.scheme = config.OptionalEnv("CROWDSEC_BOUNCER_SCHEME", "http")
 		cfg.banResponseMsg = config.OptionalEnv("CROWDSEC_BOUNCER_BAN_RESPONSE_MSG", "Forbidden")
 		cfg.banResponseFile = config.OptionalEnv("CROWDSEC_BOUNCER_BAN_RESPONSE_FILE", "")
+		cfg.forwardAuthSecret = config.OptionalEnv("CROWDSEC_BOUNCER_FORWARD_AUTH_SECRET", "")
 		banResponseCode := config.OptionalEnv("CROWDSEC_BOUNCER_BAN_RESPONSE_CODE", "403")
 		parsedCode, err := strconv.Atoi(banResponseCode)
 		if err != nil {
@@ -155,11 +159,32 @@ func isIpAuthorized(clientIP string) (bool, error) {
 }
 
 /*
+Compare the "secret" query parameter (set as part of Traefik's static forwardAuth
+address, e.g. http://bouncer:8080/api/v1/forwardAuth?secret=xxx) against the configured
+CROWDSEC_BOUNCER_FORWARD_AUTH_SECRET. Only relevant when that env var is set; returns
+true unconditionally otherwise, keeping the feature opt-in and backward compatible.
+*/
+func isForwardAuthSecretValid(c *gin.Context) bool {
+	expected := getConfig().forwardAuthSecret
+	if expected == "" {
+		return true
+	}
+	provided := c.Query(forwardAuthSecretParm)
+	return subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) == 1
+}
+
+/*
 Main route used by Traefik to verify authorization for a request
 */
 func ForwardAuth(c *gin.Context) {
 	ipProcessed.Inc()
 	clientIP := c.ClientIP()
+
+	if !isForwardAuthSecretValid(c) {
+		log.Warn().Str("ClientIP", clientIP).Msg("Rejecting forwardAuth request with missing or invalid secret")
+		handleBanResponse(c)
+		return
+	}
 
 	log.Debug().
 		Str("ClientIP", clientIP).

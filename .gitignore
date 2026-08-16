@@ -1,4 +1,5 @@
 _test.env
+.env
 
 tmp/
 

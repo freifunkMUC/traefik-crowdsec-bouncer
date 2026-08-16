@@ -54,9 +54,3 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/fbonalair/traefik-crowdsec-bouncer/config => ../config
-
-replace github.com/fbonalair/traefik-crowdsec-bouncer/model => ../model
-
-replace github.com/fbonalair/traefik-crowdsec-bouncer/controller => ../controller

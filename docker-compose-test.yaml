@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   traefik:
     image: "traefik:v3"
@@ -21,7 +19,7 @@ services:
     container_name: "simple-service"
     labels:
       # Create bouncer middleware
-      - "traefik.http.middlewares.crowdsec-bouncer.forwardauth.address=http://api:8082/api/v1/forwardAuth"
+      - "traefik.http.middlewares.crowdsec-bouncer.forwardauth.address=http://api:8082/api/v1/forwardAuth?secret=test-secret"
 
       # Traefik routing to this service
       - "traefik.enable=true"
@@ -30,7 +28,7 @@ services:
       - "traefik.http.routers.whoami.middlewares=crowdsec-bouncer@docker"
 
   crowdsec:
-    image: crowdsecurity/crowdsec:v1.6.9
+    image: crowdsecurity/crowdsec:v1.7.8
     environment:
       COLLECTIONS: "crowdsecurity/nginx"
       GID: "${GID-1000}"
@@ -51,9 +49,10 @@ services:
     environment:
       PORT: 8082
       CROWDSEC_BOUNCER_API_KEY: 40796d93c2958f9e58345514e67740e5
-      CROWDSEC_AGENT_HOST: crowdsec:8083
+      CROWDSEC_AGENT_HOST: crowdsec:8080
+      CROWDSEC_BOUNCER_FORWARD_AUTH_SECRET: test-secret
     ports:
-      - "8082:8080"
+      - "8082:8082"
 
 volumes:
   logs:

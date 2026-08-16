@@ -2,7 +2,7 @@
 ![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/fbonalair/traefik-crowdsec-bouncer)
 [![Go Report Card](https://goreportcard.com/badge/github.com/fbonalair/traefik-crowdsec-bouncer)](https://goreportcard.com/report/github.com/fbonalair/traefik-crowdsec-bouncer)
 [![Maintainability](https://api.codeclimate.com/v1/badges/7177dce30f0abdf8bcbf/maintainability)](https://codeclimate.com/github/fbonalair/traefik-crowdsec-bouncer/maintainability)
-[![ci](https://github.com/fbonalair/traefik-crowdsec-bouncer/actions/workflows/main.yml/badge.svg)](https://github.com/fbonalair/traefik-crowdsec-bouncer/actions/workflows/main.yml)
+[![ci](https://github.com/freifunkMUC/traefik-crowdsec-bouncer/actions/workflows/build.yml/badge.svg)](https://github.com/freifunkMUC/traefik-crowdsec-bouncer/actions/workflows/build.yml)
 ![GitHub tag (latest SemVer)](https://img.shields.io/github/v/tag/fbonalair/traefik-crowdsec-bouncer)
 ![Docker Image Size (latest semver)](https://img.shields.io/docker/image-size/fbonalair/traefik-crowdsec-bouncer)
 
@@ -50,7 +50,9 @@ For now, this web service is mainly intended to be used as a container. If you n
 
 ## Prerequisites
 
-You should have Traefik v2 and a CrowdSec instance running. The container is available on Docker as the image `fbonalair/traefik-crowdsec-bouncer`. Host it as you see fit, though it must have access to CrowdSec and be accessible by Traefik. Follow the [Traefik v2 ForwardAuth middleware](https://doc.traefik.io/traefik/middlewares/http/forwardauth/) documentation to create a forwardAuth middle pointing to your bouncer host. Generate a bouncer API key following [CrowdSec documentation](https://doc.crowdsec.net/docs/cscli/cscli_bouncers_add).
+You should have Traefik v2/v3 and a CrowdSec instance running. The container is available as `ghcr.io/freifunkmuc/traefik-crowdsec-bouncer`. Host it as you see fit, though it must have access to CrowdSec and be accessible by Traefik. Follow the [Traefik ForwardAuth middleware](https://doc.traefik.io/traefik/middlewares/http/forwardauth/) documentation to create a forwardAuth middleware pointing to your bouncer host. Generate a bouncer API key following [CrowdSec documentation](https://doc.crowdsec.net/docs/cscli/cscli_bouncers_add).
+
+Note that CrowdSec refuses to start in Docker/Podman without a persistent volume for `/var/lib/crowdsec/data/` (already set up in the compose files in this repo).
 
 ## Configuration
 
@@ -63,10 +65,27 @@ The web service configuration is managed via environment variables:
 - `CROWDSEC_BOUNCER_BAN_RESPONSE_CODE` - HTTP code to respond in case of a ban. Defaults to 403
 - `CROWDSEC_BOUNCER_BAN_RESPONSE_MSG` - HTTP body message to respond in case of a ban. Defaults to "Forbidden"
 - `CROWDSEC_BOUNCER_BAN_RESPONSE_FILE` - HTTP-File to respond in case of a ban. file should be included via volume and the absolute path should be used.
+- `CROWDSEC_BOUNCER_FORWARD_AUTH_SECRET` - Optional shared secret. When set, `/api/v1/forwardAuth` only accepts requests carrying a matching `?secret=` query parameter and rejects everything else (see [Security](#security) below). Defaults to empty, i.e. disabled.
 - `HEALTH_CHECKER_TIMEOUT_DURATION` - [Golang string representation of a duration](https://pkg.go.dev/time#ParseDuration) to wait for the bouncer's answer before failing the health check. Defaults to 2s
 - `PORT` - Change the listening port of the web server. Defaults to 8080
 - `GIN_MODE` - By default, runs the app in "debug" mode. Set it to "release" in production
-- `TRUSTED_PROXIES` - List of trusted proxies' IP addresses in CIDR format, delimited by commas. Default is 0.0.0.0/0, which should be fine for most use cases, but you MUST add them directly in Traefik.
+- `TRUSTED_PROXIES` - List of trusted proxies' IP addresses in CIDR format, delimited by commas. Defaults to `0.0.0.0/0`. **Read the [Security](#security) section before relying on the default.**
+
+## Security
+
+`TRUSTED_PROXIES` defaults to `0.0.0.0/0`, meaning the bouncer trusts the `X-Forwarded-For`/`X-Real-Ip` header from *any* source by default. This is necessary for `/api/v1/forwardAuth` to see the real client IP when called by Traefik, but it also means: **anyone who can reach the bouncer's port directly can set an arbitrary `X-Forwarded-For` header and bypass every CrowdSec ban.** The bouncer itself cannot fully close this gap, since Traefik's own IP is not knowable in advance across all deployment types (Docker, Kubernetes, bare metal, ...).
+
+Because of this:
+
+1. **Never expose the bouncer's port beyond Traefik.** It must not be reachable from the public internet, from other tenants in a shared cluster, or from any container/service that isn't Traefik itself.
+2. Where possible, narrow `TRUSTED_PROXIES` to Traefik's actual IP/CIDR instead of the default.
+3. As defense in depth, set `CROWDSEC_BOUNCER_FORWARD_AUTH_SECRET` to a random value and append it to Traefik's forwardAuth address, e.g.:
+
+   ```yaml
+   - "traefik.http.middlewares.crowdsec-bouncer.forwardauth.address=http://bouncer:8080/api/v1/forwardAuth?secret=<random-value>"
+   ```
+
+   Requests without the correct secret are rejected before the CrowdSec decision lookup even happens, so a spoofed `X-Forwarded-For` alone is no longer enough to bypass a ban if the bouncer's port is accidentally reachable.
 
 ## Exposed Routes
 

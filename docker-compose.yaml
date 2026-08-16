@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   traefik:
     image: "traefik:v3"
@@ -30,7 +28,7 @@ services:
       - "traefik.http.routers.whoami.middlewares=crowdsec-bouncer@docker"
 
   crowdsec:
-    image: crowdsecurity/crowdsec:v1.6.9
+    image: crowdsecurity/crowdsec:v1.7.8
     environment:
       COLLECTIONS: "crowdsecurity/nginx"
       GID: "${GID-1000}"

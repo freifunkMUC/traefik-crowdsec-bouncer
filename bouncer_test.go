@@ -32,6 +32,7 @@ func TestMain(m *testing.M) {
 	_ = os.Setenv("CROWDSEC_BOUNCER_SCHEME", u.Scheme)
 	_ = os.Setenv("CROWDSEC_BOUNCER_BAN_RESPONSE_CODE", "403")
 	_ = os.Setenv("CROWDSEC_BOUNCER_BAN_RESPONSE_MSG", "Forbidden")
+	_ = os.Setenv("CROWDSEC_BOUNCER_FORWARD_AUTH_SECRET", "test-secret")
 
 	code := m.Run()
 	server.Close()
@@ -73,7 +74,7 @@ func TestForwardAuthInvalidIp(t *testing.T) {
 	router, _ := setupRouter()
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/v1/forwardAuth", nil)
+	req, _ := http.NewRequest("GET", "/api/v1/forwardAuth?secret=test-secret", nil)
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, 403, w.Code)
@@ -83,7 +84,7 @@ func TestForwardAuthBannedIp(t *testing.T) {
 	router, _ := setupRouter()
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/v1/forwardAuth", nil)
+	req, _ := http.NewRequest("GET", "/api/v1/forwardAuth?secret=test-secret", nil)
 	req.RemoteAddr = "1.2.3.4:48328"
 	router.ServeHTTP(w, req)
 
@@ -94,9 +95,31 @@ func TestForwardAuthValidIp(t *testing.T) {
 	router, _ := setupRouter()
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/v1/forwardAuth", nil)
+	req, _ := http.NewRequest("GET", "/api/v1/forwardAuth?secret=test-secret", nil)
 	req.RemoteAddr = "127.0.0.1:48328"
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, 200, w.Code)
+}
+
+func TestForwardAuthRejectsMissingSecret(t *testing.T) {
+	router, _ := setupRouter()
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/forwardAuth", nil)
+	req.RemoteAddr = "127.0.0.1:48328"
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, 403, w.Code)
+}
+
+func TestForwardAuthRejectsWrongSecret(t *testing.T) {
+	router, _ := setupRouter()
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/forwardAuth?secret=wrong", nil)
+	req.RemoteAddr = "127.0.0.1:48328"
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, 403, w.Code)
 }
