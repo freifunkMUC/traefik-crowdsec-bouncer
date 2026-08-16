@@ -53,7 +53,7 @@ func getConfig() controllerConfig {
 	cfgOnce.Do(func() {
 		cfg.apiKey = config.RequiredEnv("CROWDSEC_BOUNCER_API_KEY")
 		cfg.host = config.RequiredEnv("CROWDSEC_AGENT_HOST")
-		cfg.scheme = config.OptionalEnv("CROWDSEC_BOUNCER_SCHEME", "http")
+		cfg.scheme = config.OptionalExpectedEnv("CROWDSEC_BOUNCER_SCHEME", "http", []string{"http", "https"})
 		cfg.banResponseMsg = config.OptionalEnv("CROWDSEC_BOUNCER_BAN_RESPONSE_MSG", "Forbidden")
 		cfg.banResponseFile = config.OptionalEnv("CROWDSEC_BOUNCER_BAN_RESPONSE_FILE", "")
 		cfg.forwardAuthSecret = config.OptionalEnv("CROWDSEC_BOUNCER_FORWARD_AUTH_SECRET", "")

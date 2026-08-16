@@ -18,6 +18,22 @@ func TestOptionalEnvReturnsValue(t *testing.T) {
 	}
 }
 
+func TestOptionalExpectedEnvReturnsDefaultWhenUnset(t *testing.T) {
+	t.Setenv("OPTIONAL_EXPECTED_TEST_ENV", "")
+	got := OptionalExpectedEnv("OPTIONAL_EXPECTED_TEST_ENV", "http", []string{"http", "https"})
+	if got != "http" {
+		t.Fatalf("expected default value, got %q", got)
+	}
+}
+
+func TestOptionalExpectedEnvReturnsValueWhenExpected(t *testing.T) {
+	t.Setenv("OPTIONAL_EXPECTED_TEST_ENV", "https")
+	got := OptionalExpectedEnv("OPTIONAL_EXPECTED_TEST_ENV", "http", []string{"http", "https"})
+	if got != "https" {
+		t.Fatalf("expected env value, got %q", got)
+	}
+}
+
 func TestContains(t *testing.T) {
 	if !contains([]string{"a", "b", "c"}, "b") {
 		t.Fatalf("expected to find value in slice")

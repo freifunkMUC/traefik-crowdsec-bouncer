@@ -39,6 +39,17 @@ func ExpectedEnv(varName string, expected []string) string {
 	return envVar
 }
 
+/*
+	Check for an environment variable value with expected possibilities, if absent use a default value, exit program if value not expected
+*/
+func OptionalExpectedEnv(varName string, optional string, expected []string) string {
+	envVar := OptionalEnv(varName, optional)
+	if !contains(expected, envVar) {
+		log.Fatalf("The value for env var %s is not expected. Expected values are %v", varName, expected)
+	}
+	return envVar
+}
+
 func contains(source []string, target string) bool {
 	for _, a := range source {
 		if a == target {
