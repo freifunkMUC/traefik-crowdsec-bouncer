@@ -26,11 +26,11 @@ import (
 )
 
 const (
-	realIpHeader          = "X-Real-Ip"
-	forwardHeader         = "X-Forwarded-For"
-	crowdsecAuthHeader    = "X-Api-Key"
-	crowdsecBouncerRoute  = "v1/decisions"
-	healthCheckIp         = "127.0.0.1"
+	realIpHeader           = "X-Real-Ip"
+	forwardHeader          = "X-Forwarded-For"
+	crowdsecAuthHeader     = "X-Api-Key"
+	crowdsecBouncerRoute   = "v1/decisions"
+	healthCheckIp          = "127.0.0.1"
 	forwardAuthSecretParam = "secret"
 )
 
@@ -42,6 +42,8 @@ type controllerConfig struct {
 	banResponseMsg    string
 	banResponseFile   string
 	forwardAuthSecret string
+	streamMode        bool
+	streamInterval    time.Duration
 }
 
 var cfg controllerConfig
@@ -61,6 +63,20 @@ func getConfig() controllerConfig {
 			log.Fatal().Err(err).Msgf("The value for env var %s is not an int. It should be a valid http response code.", "CROWDSEC_BOUNCER_BAN_RESPONSE_CODE")
 		}
 		cfg.banResponseCode = parsedCode
+
+		streamMode := config.OptionalEnv("CROWDSEC_BOUNCER_STREAM_MODE", "false")
+		parsedStreamMode, err := strconv.ParseBool(streamMode)
+		if err != nil {
+			log.Fatal().Err(err).Msgf("The value for env var %s is not a bool.", "CROWDSEC_BOUNCER_STREAM_MODE")
+		}
+		cfg.streamMode = parsedStreamMode
+
+		streamInterval := config.OptionalEnv("CROWDSEC_BOUNCER_STREAM_INTERVAL", "10s")
+		parsedStreamInterval, err := time.ParseDuration(streamInterval)
+		if err != nil {
+			log.Fatal().Err(err).Msgf("The value for env var %s is not a valid duration.", "CROWDSEC_BOUNCER_STREAM_INTERVAL")
+		}
+		cfg.streamInterval = parsedStreamInterval
 	})
 
 	return cfg
@@ -198,8 +214,15 @@ func ForwardAuth(c *gin.Context) {
 		Str(realIpHeader, c.Request.Header.Get(realIpHeader)).
 		Msg("Handling forwardAuth request")
 
-	// Getting and verifying ip using ClientIP function
-	isAuthorized, err := isIpAuthorized(c.Request.Context(), clientIP)
+	// Getting and verifying ip, either against the local decision stream cache
+	// or with a live CrowdSec LAPI call, depending on CROWDSEC_BOUNCER_STREAM_MODE
+	var isAuthorized bool
+	var err error
+	if getConfig().streamMode {
+		isAuthorized, err = isIpAuthorizedFromCache(clientIP)
+	} else {
+		isAuthorized, err = isIpAuthorized(c.Request.Context(), clientIP)
+	}
 	if err != nil {
 		lookupErrors.Inc()
 		log.Warn().Err(err).Msgf("An error occurred while checking IP %q", clientIP)
@@ -215,6 +238,16 @@ func ForwardAuth(c *gin.Context) {
 Route to check bouncer connectivity with Crowdsec agent. Mainly use for Kubernetes readiness probe
 */
 func Healthz(c *gin.Context) {
+	if getConfig().streamMode {
+		if !streamHealthy() {
+			log.Warn().Msg("The health check did not pass: the CrowdSec decision stream cache is not initialized yet or stale")
+			c.Status(http.StatusForbidden)
+			return
+		}
+		c.Status(http.StatusOK)
+		return
+	}
+
 	isHealthy, err := isIpAuthorized(c.Request.Context(), healthCheckIp)
 	if err != nil || !isHealthy {
 		log.Warn().Err(err).Msgf("The health check did not pass. Check error if present and if the IP %q is authorized", healthCheckIp)

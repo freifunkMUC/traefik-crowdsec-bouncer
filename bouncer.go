@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 
 	"github.com/fbonalair/traefik-crowdsec-bouncer/config"
@@ -20,6 +21,11 @@ func main() {
 	router, err := setupRouter()
 	if err != nil {
 		log.Fatal().Err(err).Msgf("An error occurred while starting webserver")
+		return
+	}
+
+	if err := controller.StartStreamIfEnabled(context.Background()); err != nil {
+		log.Fatal().Err(err).Msgf("An error occurred while starting the CrowdSec decision stream")
 		return
 	}
 

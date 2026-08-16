@@ -66,10 +66,28 @@ The web service configuration is managed via environment variables:
 - `CROWDSEC_BOUNCER_BAN_RESPONSE_MSG` - HTTP body message to respond in case of a ban. Defaults to "Forbidden"
 - `CROWDSEC_BOUNCER_BAN_RESPONSE_FILE` - HTTP-File to respond in case of a ban. file should be included via volume and the absolute path should be used.
 - `CROWDSEC_BOUNCER_FORWARD_AUTH_SECRET` - Optional shared secret. When set, `/api/v1/forwardAuth` only accepts requests carrying a matching `?secret=` query parameter and rejects everything else (see [Security](#security) below). Defaults to empty, i.e. disabled.
+- `CROWDSEC_BOUNCER_STREAM_MODE` - `true`/`false`. When enabled, the bouncer no longer calls the CrowdSec LAPI on every request; instead it keeps a local, periodically refreshed copy of all active ban decisions and checks against that (see [Stream Mode](#stream-mode) below). Defaults to `false`.
+- `CROWDSEC_BOUNCER_STREAM_INTERVAL` - How often to refresh the local decision cache when stream mode is enabled. [Golang duration string](https://pkg.go.dev/time#ParseDuration). Defaults to `10s`.
 - `HEALTH_CHECKER_TIMEOUT_DURATION` - [Golang string representation of a duration](https://pkg.go.dev/time#ParseDuration) to wait for the bouncer's answer before failing the health check. Defaults to 2s
 - `PORT` - Change the listening port of the web server. Defaults to 8080
 - `GIN_MODE` - By default, runs the app in "debug" mode. Set it to "release" in production
 - `TRUSTED_PROXIES` - List of trusted proxies' IP addresses in CIDR format, delimited by commas. Defaults to `0.0.0.0/0`. **Read the [Security](#security) section before relying on the default.**
+
+## Stream Mode
+
+By default (`CROWDSEC_BOUNCER_STREAM_MODE=false`, "live mode"), every single request handled by `/api/v1/forwardAuth` makes a synchronous HTTP call to the CrowdSec LAPI. That's simple and always up to date, but it also means: extra latency on every request, load on CrowdSec proportional to your total traffic, and if CrowdSec is slow or briefly unreachable, requests can block for up to the client timeout (5s) before failing closed — under a bad enough CrowdSec hiccup, that's felt by everything behind Traefik at once.
+
+With `CROWDSEC_BOUNCER_STREAM_MODE=true`, the bouncer instead:
+
+1. On startup, fetches the full list of active decisions from CrowdSec's [decision stream](https://docs.crowdsec.net/docs/local_api/decision_stream) (`/v1/decisions/stream?startup=true`) and retries with backoff until it succeeds — the bouncer won't accept traffic until this initial sync has completed.
+2. Every `CROWDSEC_BOUNCER_STREAM_INTERVAL` (default `10s`), fetches only what changed (`startup=false`) and applies it to the local cache.
+3. Answers every `/api/v1/forwardAuth` request from that local, in-memory cache — no network call, no per-request CrowdSec load.
+
+Trade-offs to be aware of:
+
+- **Bans/unbans take up to `CROWDSEC_BOUNCER_STREAM_INTERVAL` to take effect**, since they're only picked up on the next background sync — instant in live mode, eventually-consistent in stream mode.
+- **The bouncer keeps serving from its last known-good cache for a while if CrowdSec becomes unreachable**, rather than immediately failing closed like live mode does. It only starts failing closed once the cache is stale (no successful sync for longer than 3× the sync interval) — this is what makes stream mode more resilient to brief CrowdSec hiccups than live mode.
+- `/api/v1/healthz` reflects the stream cache's freshness in this mode (not a live LAPI call), and `crowdsec_traefik_bouncer_stream_sync_error_total` / `crowdsec_traefik_bouncer_stream_cached_decisions` (see [Exposed Routes](#exposed-routes)) are the metrics to alert on.
 
 ## Security
 
@@ -96,7 +114,7 @@ The web service exposes the following routes:
 - GET `/api/v1/forwardAuth` - Main route to be used by Traefik: queries the CrowdSec agent with the header `X-Real-Ip` as the client IP
 - GET `/api/v1/ping` - Simple health route that responds with "pong" and HTTP 200
 - GET `/api/v1/healthz` - Another health route that queries the CrowdSec agent with localhost (127.0.0.1)
-- GET `/api/v1/metrics` - Prometheus route to scrape metrics. Exposes `crowdsec_traefik_bouncer_processed_ip_total` and `crowdsec_traefik_bouncer_lookup_error_total` (requests denied because the CrowdSec lookup itself failed, e.g. LAPI unreachable — distinct from an actual ban, useful for alerting on fail-closed outages)
+- GET `/api/v1/metrics` - Prometheus route to scrape metrics. Exposes `crowdsec_traefik_bouncer_processed_ip_total` and `crowdsec_traefik_bouncer_lookup_error_total` (requests denied because the CrowdSec lookup itself failed, e.g. LAPI unreachable — distinct from an actual ban, useful for alerting on fail-closed outages). In [stream mode](#stream-mode), also exposes `crowdsec_traefik_bouncer_stream_sync_error_total` and `crowdsec_traefik_bouncer_stream_cached_decisions{scope="ip"|"range"}`
 
 # Contribution
 
