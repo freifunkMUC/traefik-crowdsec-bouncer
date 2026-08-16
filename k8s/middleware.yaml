@@ -1,0 +1,19 @@
+# Requires the Traefik Kubernetes CRD provider
+# (https://doc.traefik.io/traefik/reference/routing-configuration/kubernetes/crd/http/middleware/).
+#
+# NOTE: unlike the env vars in deployment.yaml, this "address" field is a
+# plain string on the Middleware resource — Traefik's CRDs have no
+# secretKeyRef-style indirection for it, so the forward-auth secret ends up
+# readable in plaintext to anyone who can `kubectl get middleware -o yaml`
+# this resource. It's still worth setting (defense in depth against the
+# bouncer being reachable outside Traefik), but the NetworkPolicy is the
+# actual control here, not this. Drop the "?secret=..." query string entirely
+# if you'd rather not have it in a non-Secret resource at all.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: crowdsec-bouncer
+spec:
+  forwardAuth:
+    address: "http://crowdsec-bouncer.default.svc.cluster.local:8080/api/v1/forwardAuth?secret=REPLACE_WITH_SAME_VALUE_AS_FORWARD_AUTH_SECRET"
+    trustForwardHeader: true

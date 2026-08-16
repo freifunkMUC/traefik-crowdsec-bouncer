@@ -1,0 +1,29 @@
+# This is the actual security control, not the forwardAuth secret in
+# middleware.yaml — see the "Security" section in the main README. Without
+# this (or an equivalent restriction), anything that can reach the bouncer
+# pod on port 8080 can forge X-Forwarded-For and bypass every CrowdSec ban.
+#
+# NOTE: NetworkPolicy is only enforced if your cluster's CNI supports it
+# (e.g. Calico, Cilium). Plain kubenet or an unconfigured cloud-provider CNI
+# will silently accept this resource without enforcing it — verify it's
+# actually being enforced on your cluster.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: crowdsec-bouncer-restrict-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: crowdsec-bouncer
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        # Adjust this selector to match your actual Traefik pods' labels
+        # (this example assumes the official Traefik Helm chart's defaults).
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - protocol: TCP
+          port: 8080

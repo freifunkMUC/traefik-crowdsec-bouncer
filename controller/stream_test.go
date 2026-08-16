@@ -13,6 +13,7 @@ import (
 
 	"github.com/fbonalair/traefik-crowdsec-bouncer/cache"
 	"github.com/fbonalair/traefik-crowdsec-bouncer/model"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -24,6 +25,12 @@ var (
 	mockStreamHits int
 )
 
+var (
+	mockLiveMu     sync.Mutex
+	mockLiveBanned map[string]bool
+	mockLiveFail   bool
+)
+
 func resetMockStream() {
 	mockStreamMu.Lock()
 	defer mockStreamMu.Unlock()
@@ -33,41 +40,77 @@ func resetMockStream() {
 	mockStreamHits = 0
 }
 
-// resetStreamState resets the package-level stream/cache state so each test
-// starts from a clean slate, independent of test execution order.
-func resetStreamState() {
+func resetMockLive() {
+	mockLiveMu.Lock()
+	defer mockLiveMu.Unlock()
+	mockLiveBanned = map[string]bool{}
+	mockLiveFail = false
+}
+
+// resetTestState resets the package-level stream/cache state and both mock
+// LAPI handlers so each test starts from a clean slate, independent of test
+// execution order.
+func resetTestState() {
 	decisionCache = cache.New()
 	streamMu.Lock()
 	lastSyncSuccess = time.Time{}
 	streamInitialized = false
 	streamMu.Unlock()
 	resetMockStream()
+	resetMockLive()
 }
 
 func TestMain(m *testing.M) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/decisions/stream" {
+		switch r.URL.Path {
+		case "/v1/decisions/stream":
+			mockStreamMu.Lock()
+			defer mockStreamMu.Unlock()
+			mockStreamHits++
+			if mockStreamFail {
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte("boom"))
+				return
+			}
+			body, _ := json.Marshal(streamResponse{New: mockStreamNew, Deleted: mockStreamDel})
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(body)
+		case "/v1/decisions":
+			mockLiveMu.Lock()
+			defer mockLiveMu.Unlock()
+			if mockLiveFail {
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte("boom"))
+				return
+			}
+			if mockLiveBanned[r.URL.Query().Get("ip")] {
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`[{"type":"ban"}]`))
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("null"))
+		default:
 			http.NotFound(w, r)
-			return
 		}
-		mockStreamMu.Lock()
-		defer mockStreamMu.Unlock()
-		mockStreamHits++
-		if mockStreamFail {
-			w.WriteHeader(http.StatusInternalServerError)
-			_, _ = w.Write([]byte("boom"))
-			return
-		}
-		body, _ := json.Marshal(streamResponse{New: mockStreamNew, Deleted: mockStreamDel})
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(body)
 	}))
+
+	banFile, err := os.CreateTemp("", "ban-response-*.html")
+	if err != nil {
+		panic(err)
+	}
+	if _, err := banFile.WriteString("<h1>banned</h1>"); err != nil {
+		panic(err)
+	}
+	_ = banFile.Close()
+	defer os.Remove(banFile.Name())
 
 	u, _ := url.Parse(server.URL)
 	_ = os.Setenv("CROWDSEC_BOUNCER_API_KEY", "test-api-key")
 	_ = os.Setenv("CROWDSEC_AGENT_HOST", u.Host)
 	_ = os.Setenv("CROWDSEC_BOUNCER_SCHEME", u.Scheme)
 	_ = os.Setenv("CROWDSEC_BOUNCER_STREAM_INTERVAL", "30ms")
+	_ = os.Setenv("CROWDSEC_BOUNCER_BAN_RESPONSE_FILE", banFile.Name())
 	streamInitialRetryDelay = time.Millisecond
 
 	code := m.Run()
@@ -76,7 +119,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestSyncOnceAppliesNewDecisions(t *testing.T) {
-	resetStreamState()
+	resetTestState()
 	mockStreamNew = []model.Decision{{Scope: "Ip", Value: "1.2.3.4"}}
 
 	err := syncOnce(context.Background(), true)
@@ -87,7 +130,7 @@ func TestSyncOnceAppliesNewDecisions(t *testing.T) {
 }
 
 func TestSyncOnceReturnsErrorOnFailureAndLeavesCacheUntouched(t *testing.T) {
-	resetStreamState()
+	resetTestState()
 	mockStreamNew = []model.Decision{{Scope: "Ip", Value: "1.2.3.4"}}
 	require := assert.New(t)
 	require.NoError(syncOnce(context.Background(), true))
@@ -104,12 +147,12 @@ func TestSyncOnceReturnsErrorOnFailureAndLeavesCacheUntouched(t *testing.T) {
 }
 
 func TestStreamHealthyBeforeAnySync(t *testing.T) {
-	resetStreamState()
+	resetTestState()
 	assert.False(t, streamHealthy())
 }
 
 func TestIsIpAuthorizedFromCacheFailsClosedWhenNotReady(t *testing.T) {
-	resetStreamState()
+	resetTestState()
 
 	authorized, err := isIpAuthorizedFromCache("1.2.3.4")
 
@@ -118,7 +161,7 @@ func TestIsIpAuthorizedFromCacheFailsClosedWhenNotReady(t *testing.T) {
 }
 
 func TestIsIpAuthorizedFromCacheAfterSync(t *testing.T) {
-	resetStreamState()
+	resetTestState()
 	mockStreamNew = []model.Decision{{Scope: "Ip", Value: "1.2.3.4"}}
 	assert.NoError(t, syncOnce(context.Background(), true))
 
@@ -132,7 +175,7 @@ func TestIsIpAuthorizedFromCacheAfterSync(t *testing.T) {
 }
 
 func TestStartStreamRetriesUntilInitialSyncSucceeds(t *testing.T) {
-	resetStreamState()
+	resetTestState()
 	mockStreamMu.Lock()
 	mockStreamFail = true
 	mockStreamMu.Unlock()
@@ -162,7 +205,7 @@ func TestStartStreamRetriesUntilInitialSyncSucceeds(t *testing.T) {
 }
 
 func TestStartStreamBackgroundLoopPicksUpIncrementalUpdates(t *testing.T) {
-	resetStreamState()
+	resetTestState()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer func() {
@@ -183,10 +226,110 @@ func TestStartStreamBackgroundLoopPicksUpIncrementalUpdates(t *testing.T) {
 }
 
 func TestStartStreamIfEnabledIsNoopByDefault(t *testing.T) {
-	resetStreamState()
+	resetTestState()
 	// CROWDSEC_BOUNCER_STREAM_MODE isn't set in TestMain, so this must return
 	// immediately without ever hitting the mock stream server.
 	assert.NoError(t, StartStreamIfEnabled(context.Background()))
 	assert.Equal(t, 0, mockStreamHits)
 	assert.False(t, streamHealthy())
+}
+
+// The following exercise checkAuthorization/checkHealthy (the functions
+// ForwardAuth/Healthz actually call) directly with an explicit streamMode
+// argument, covering both modes' HTTP-route-level wiring even though
+// CROWDSEC_BOUNCER_STREAM_MODE itself is never toggled at the process/env
+// level within a single test binary (see getConfig's sync.Once).
+
+func TestCheckAuthorizationLiveModeAllowsCleanIp(t *testing.T) {
+	resetTestState()
+
+	authorized, err := checkAuthorization(context.Background(), "1.1.1.1", false)
+
+	assert.NoError(t, err)
+	assert.True(t, authorized)
+}
+
+func TestCheckAuthorizationLiveModeBlocksBannedIp(t *testing.T) {
+	resetTestState()
+	mockLiveBanned["6.6.6.6"] = true
+
+	authorized, err := checkAuthorization(context.Background(), "6.6.6.6", false)
+
+	assert.NoError(t, err)
+	assert.False(t, authorized)
+}
+
+func TestCheckAuthorizationLiveModeErrorOnLapiFailure(t *testing.T) {
+	resetTestState()
+	mockLiveFail = true
+
+	_, err := checkAuthorization(context.Background(), "1.1.1.1", false)
+
+	assert.Error(t, err)
+}
+
+func TestCheckAuthorizationStreamModeUsesCache(t *testing.T) {
+	resetTestState()
+	mockStreamNew = []model.Decision{{Scope: "Ip", Value: "2.2.2.2"}}
+	require := assert.New(t)
+	require.NoError(syncOnce(context.Background(), true))
+
+	bannedAuthorized, err := checkAuthorization(context.Background(), "2.2.2.2", true)
+	assert.NoError(t, err)
+	assert.False(t, bannedAuthorized)
+
+	cleanAuthorized, err := checkAuthorization(context.Background(), "3.3.3.3", true)
+	assert.NoError(t, err)
+	assert.True(t, cleanAuthorized)
+}
+
+func TestCheckHealthyLiveMode(t *testing.T) {
+	resetTestState()
+
+	healthy, err := checkHealthy(context.Background(), false)
+
+	assert.NoError(t, err)
+	assert.True(t, healthy)
+}
+
+func TestCheckHealthyLiveModeUnhealthyOnLapiFailure(t *testing.T) {
+	resetTestState()
+	mockLiveFail = true
+
+	healthy, err := checkHealthy(context.Background(), false)
+
+	assert.Error(t, err)
+	assert.False(t, healthy)
+}
+
+func TestCheckHealthyStreamModeBeforeAnySync(t *testing.T) {
+	resetTestState()
+
+	healthy, err := checkHealthy(context.Background(), true)
+
+	assert.NoError(t, err)
+	assert.False(t, healthy)
+}
+
+func TestCheckHealthyStreamModeAfterSync(t *testing.T) {
+	resetTestState()
+	assert.NoError(t, syncOnce(context.Background(), true))
+
+	healthy, err := checkHealthy(context.Background(), true)
+
+	assert.NoError(t, err)
+	assert.True(t, healthy)
+}
+
+func TestHandleBanResponseServesHtmlFile(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request, _ = http.NewRequest(http.MethodGet, "/api/v1/forwardAuth", nil)
+
+	handleBanResponse(c)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+	assert.Equal(t, "<h1>banned</h1>", w.Body.String())
+	assert.Contains(t, w.Header().Get("Content-Type"), "text/html")
 }

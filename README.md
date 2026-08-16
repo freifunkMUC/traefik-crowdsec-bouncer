@@ -54,6 +54,8 @@ You should have Traefik v2/v3 and a CrowdSec instance running. The container is 
 
 Note that CrowdSec refuses to start in Docker/Podman without a persistent volume for `/var/lib/crowdsec/data/` (already set up in the compose files in this repo).
 
+For a Kubernetes deployment (Traefik's Kubernetes CRD provider, readiness/liveness probes, a `NetworkPolicy` restricting the bouncer to only be reachable from Traefik), see [`k8s/`](k8s/).
+
 ## Configuration
 
 The web service configuration is managed via environment variables:
@@ -88,6 +90,7 @@ Trade-offs to be aware of:
 - **Bans/unbans take up to `CROWDSEC_BOUNCER_STREAM_INTERVAL` to take effect**, since they're only picked up on the next background sync — instant in live mode, eventually-consistent in stream mode.
 - **The bouncer keeps serving from its last known-good cache for a while if CrowdSec becomes unreachable**, rather than immediately failing closed like live mode does. It only starts failing closed once the cache is stale (no successful sync for longer than 3× the sync interval) — this is what makes stream mode more resilient to brief CrowdSec hiccups than live mode.
 - `/api/v1/healthz` reflects the stream cache's freshness in this mode (not a live LAPI call), and `crowdsec_traefik_bouncer_stream_sync_error_total` / `crowdsec_traefik_bouncer_stream_cached_decisions` (see [Exposed Routes](#exposed-routes)) are the metrics to alert on.
+- The container's own `HEALTHCHECK` automatically switches from `/api/v1/ping` (live mode) to `/api/v1/healthz` (stream mode) based on `CROWDSEC_BOUNCER_STREAM_MODE` — in stream mode that check is a cheap local cache-freshness check, so Docker/Kubernetes will correctly mark the container unhealthy if the decision cache goes stale.
 
 ## Security
 

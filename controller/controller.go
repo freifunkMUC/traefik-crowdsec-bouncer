@@ -214,15 +214,7 @@ func ForwardAuth(c *gin.Context) {
 		Str(realIpHeader, c.Request.Header.Get(realIpHeader)).
 		Msg("Handling forwardAuth request")
 
-	// Getting and verifying ip, either against the local decision stream cache
-	// or with a live CrowdSec LAPI call, depending on CROWDSEC_BOUNCER_STREAM_MODE
-	var isAuthorized bool
-	var err error
-	if getConfig().streamMode {
-		isAuthorized, err = isIpAuthorizedFromCache(clientIP)
-	} else {
-		isAuthorized, err = isIpAuthorized(c.Request.Context(), clientIP)
-	}
+	isAuthorized, err := checkAuthorization(c.Request.Context(), clientIP, getConfig().streamMode)
 	if err != nil {
 		lookupErrors.Inc()
 		log.Warn().Err(err).Msgf("An error occurred while checking IP %q", clientIP)
@@ -234,27 +226,39 @@ func ForwardAuth(c *gin.Context) {
 	}
 }
 
+// checkAuthorization answers whether clientIP is authorized (i.e. not
+// banned), either against the local decision stream cache or with a live
+// CrowdSec LAPI call, depending on streamMode. Split out from ForwardAuth so
+// both modes can be exercised directly in tests without depending on
+// getConfig()'s process-wide, once-initialized cache.
+func checkAuthorization(ctx context.Context, clientIP string, streamMode bool) (bool, error) {
+	if streamMode {
+		return isIpAuthorizedFromCache(clientIP)
+	}
+	return isIpAuthorized(ctx, clientIP)
+}
+
 /*
 Route to check bouncer connectivity with Crowdsec agent. Mainly use for Kubernetes readiness probe
 */
 func Healthz(c *gin.Context) {
-	if getConfig().streamMode {
-		if !streamHealthy() {
-			log.Warn().Msg("The health check did not pass: the CrowdSec decision stream cache is not initialized yet or stale")
-			c.Status(http.StatusForbidden)
-			return
-		}
-		c.Status(http.StatusOK)
-		return
-	}
-
-	isHealthy, err := isIpAuthorized(c.Request.Context(), healthCheckIp)
+	isHealthy, err := checkHealthy(c.Request.Context(), getConfig().streamMode)
 	if err != nil || !isHealthy {
-		log.Warn().Err(err).Msgf("The health check did not pass. Check error if present and if the IP %q is authorized", healthCheckIp)
+		log.Warn().Err(err).Msgf("The health check did not pass. Check error if present and if IP %q is authorized (or, in stream mode, if the decision cache is initialized and fresh)", healthCheckIp)
 		c.Status(http.StatusForbidden)
 	} else {
 		c.Status(http.StatusOK)
 	}
+}
+
+// checkHealthy mirrors checkAuthorization's mode split for the health route:
+// in stream mode it's a cheap local freshness check on the decision cache,
+// otherwise it's a live CrowdSec lookup for healthCheckIp.
+func checkHealthy(ctx context.Context, streamMode bool) (bool, error) {
+	if streamMode {
+		return streamHealthy(), nil
+	}
+	return isIpAuthorized(ctx, healthCheckIp)
 }
 
 /*

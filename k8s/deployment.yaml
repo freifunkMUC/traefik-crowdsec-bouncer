@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crowdsec-bouncer
+  labels:
+    app.kubernetes.io/name: crowdsec-bouncer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: crowdsec-bouncer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: crowdsec-bouncer
+    spec:
+      containers:
+        - name: bouncer
+          image: ghcr.io/freifunkmuc/traefik-crowdsec-bouncer:v0.6.2
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            # Host/port of your CrowdSec LAPI service — adjust to your setup.
+            - name: CROWDSEC_AGENT_HOST
+              value: "crowdsec.crowdsec.svc.cluster.local:8080"
+            - name: GIN_MODE
+              value: "release"
+            # Stream mode is the better default for Kubernetes: with multiple
+            # bouncer replicas, live mode means every replica hits the
+            # CrowdSec LAPI on every single request; stream mode only polls
+            # periodically and answers from a local cache. See the "Stream
+            # Mode" section in the main README for the trade-offs. Set to
+            # "false" (or remove) to go back to live mode.
+            - name: CROWDSEC_BOUNCER_STREAM_MODE
+              value: "true"
+            - name: CROWDSEC_BOUNCER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: crowdsec-bouncer-secret
+                  key: api-key
+            # Defense in depth alongside the NetworkPolicy below — see
+            # middleware.yaml and the "Security" section in the main README.
+            - name: CROWDSEC_BOUNCER_FORWARD_AUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: crowdsec-bouncer-secret
+                  key: forward-auth-secret
+          readinessProbe:
+            # In stream mode this is a cheap local cache-freshness check (no
+            # CrowdSec round-trip); in live mode it does call CrowdSec, so
+            # widen periodSeconds if you switch modes and want to limit load.
+            httpGet:
+              path: /api/v1/healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/v1/ping
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+          securityContext:
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
