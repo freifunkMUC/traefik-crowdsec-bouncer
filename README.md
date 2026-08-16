@@ -72,7 +72,7 @@ The web service configuration is managed via environment variables:
 - `CROWDSEC_BOUNCER_STREAM_INTERVAL` - How often to refresh the local decision cache when stream mode is enabled. [Golang duration string](https://pkg.go.dev/time#ParseDuration). Defaults to `10s`.
 - `HEALTH_CHECKER_TIMEOUT_DURATION` - [Golang string representation of a duration](https://pkg.go.dev/time#ParseDuration) to wait for the bouncer's answer before failing the health check. Defaults to 2s
 - `PORT` - Change the listening port of the web server. Defaults to 8080
-- `GIN_MODE` - By default, runs the app in "debug" mode. Set it to "release" in production
+- `GIN_MODE` - The published container image defaults to `release`. If you build/run the binary directly rather than via the image, Gin itself defaults to "debug" mode unless you set this to `release`
 - `TRUSTED_PROXIES` - List of trusted proxies' IP addresses in CIDR format, delimited by commas. Defaults to `0.0.0.0/0`. **Read the [Security](#security) section before relying on the default.**
 
 ## Stream Mode
