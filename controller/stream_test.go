@@ -103,7 +103,7 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	_ = banFile.Close()
-	defer os.Remove(banFile.Name())
+	defer func() { _ = os.Remove(banFile.Name()) }()
 
 	u, _ := url.Parse(server.URL)
 	_ = os.Setenv("CROWDSEC_BOUNCER_API_KEY", "test-api-key")
