@@ -26,9 +26,10 @@ var (
 )
 
 var (
-	mockLiveMu     sync.Mutex
-	mockLiveBanned map[string]bool
-	mockLiveFail   bool
+	mockLiveMu        sync.Mutex
+	mockLiveBanned    map[string]bool
+	mockLiveFail      bool
+	mockLiveForbidden bool
 )
 
 func resetMockStream() {
@@ -45,6 +46,7 @@ func resetMockLive() {
 	defer mockLiveMu.Unlock()
 	mockLiveBanned = map[string]bool{}
 	mockLiveFail = false
+	mockLiveForbidden = false
 }
 
 // resetTestState resets the package-level stream/cache state and both mock
@@ -78,6 +80,10 @@ func TestMain(m *testing.M) {
 		case "/v1/decisions":
 			mockLiveMu.Lock()
 			defer mockLiveMu.Unlock()
+			if mockLiveForbidden {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
 			if mockLiveFail {
 				w.WriteHeader(http.StatusInternalServerError)
 				_, _ = w.Write([]byte("boom"))
@@ -332,4 +338,30 @@ func TestHandleBanResponseServesHtmlFile(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	assert.Equal(t, "<h1>banned</h1>", w.Body.String())
 	assert.Contains(t, w.Header().Get("Content-Type"), "text/html")
+}
+
+func TestCheckAuthorizationLiveModeFailsClosedOn403FromCrowdSec(t *testing.T) {
+	resetTestState()
+	mockLiveForbidden = true
+
+	// A 403 from CrowdSec itself (e.g. revoked/wrong bouncer API key) isn't
+	// an error, just a not-authorized decision: isIpAuthorized deliberately
+	// short-circuits on it rather than trying to parse a body.
+	authorized, err := checkAuthorization(context.Background(), "1.1.1.1", false)
+
+	assert.NoError(t, err)
+	assert.False(t, authorized)
+}
+
+// isForwardAuthSecretValid's "disabled" branch (CROWDSEC_BOUNCER_FORWARD_AUTH_SECRET
+// unset) can't be exercised in package main's bouncer_test.go, which sets the
+// secret for its whole test binary — this package's TestMain never sets it,
+// so it's the right place to cover the default/backward-compatible behavior.
+func TestIsForwardAuthSecretValidReturnsTrueWhenDisabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request, _ = http.NewRequest(http.MethodGet, "/api/v1/forwardAuth", nil)
+
+	assert.True(t, isForwardAuthSecretValid(c))
 }

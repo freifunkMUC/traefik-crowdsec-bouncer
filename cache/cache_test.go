@@ -41,10 +41,34 @@ func TestApplyRemovesDeletedRange(t *testing.T) {
 	assert.False(t, c.IsBanned("5.6.7.42"))
 }
 
+func TestApplyRemovesOneRangeKeepsOthers(t *testing.T) {
+	c := New()
+	c.Apply([]model.Decision{
+		{Scope: "Range", Value: "5.6.7.0/24"},
+		{Scope: "Range", Value: "8.8.8.0/24"},
+	}, nil)
+
+	c.Apply(nil, []model.Decision{{Scope: "Range", Value: "5.6.7.0/24"}})
+
+	assert.False(t, c.IsBanned("5.6.7.42"))
+	assert.True(t, c.IsBanned("8.8.8.42"))
+}
+
 func TestApplyIgnoresUnknownScope(t *testing.T) {
 	c := New()
 	c.Apply([]model.Decision{{Scope: "Country", Value: "FR"}}, nil)
 
+	ips, ranges := c.Size()
+	assert.Equal(t, 0, ips)
+	assert.Equal(t, 0, ranges)
+}
+
+func TestApplyRemoveIgnoresUnknownScope(t *testing.T) {
+	c := New()
+
+	assert.NotPanics(t, func() {
+		c.Apply(nil, []model.Decision{{Scope: "Country", Value: "FR"}})
+	})
 	ips, ranges := c.Size()
 	assert.Equal(t, 0, ips)
 	assert.Equal(t, 0, ranges)
