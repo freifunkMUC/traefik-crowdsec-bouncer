@@ -3,7 +3,7 @@ module github.com/fbonalair/traefik-crowdsec-bouncer
 go 1.25.0
 
 require (
-	github.com/gin-contrib/logger v1.2.7
+	github.com/gin-contrib/logger v1.2.8
 	github.com/gin-gonic/gin v1.12.0
 	github.com/prometheus/client_golang v1.24.1
 	github.com/rs/zerolog v1.35.1
