@@ -39,7 +39,7 @@ services:
       - crowdsec-config-example:/etc/crowdsec/
 
   bouncer:
-    image: ghcr.io/freifunkmuc/traefik-crowdsec-bouncer:v0.6.2
+    image: ghcr.io/freifunkmuc/traefik-crowdsec-bouncer:v1.0.0
     container_name: "bouncer-example"
     environment:
       CROWDSEC_BOUNCER_API_KEY: MyApiKey

@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: bouncer
-          image: ghcr.io/freifunkmuc/traefik-crowdsec-bouncer:v0.6.2
+          image: ghcr.io/freifunkmuc/traefik-crowdsec-bouncer:v1.0.0
           ports:
             - name: http
               containerPort: 8080
