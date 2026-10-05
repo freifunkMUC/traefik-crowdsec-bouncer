@@ -17,6 +17,17 @@ permissions:
   security-events: write
 
 jobs: # Docs: <https://git.io/JvxXE>
+  gitleaks:
+    name: Gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { fetch-depth: 0 }
+
+      - uses: gacts/gitleaks@4fd785dcdaf557fda64e05b0ae033b8f7d82fb81 # v1.3.3
+        with:
+          config-path: .gitleaks.toml
+
   golangci-lint:
     name: Golang-CI (lint)
     runs-on: ubuntu-latest
@@ -25,12 +36,12 @@ jobs: # Docs: <https://git.io/JvxXE>
         with: { fetch-depth: 0 }
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.25"
+          go-version-file: go.mod
           cache: false
 
       - name: Run linter
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
-          version: v2.11 # without patch version
+          version: v2.14 # without patch version
           only-new-issues: false # show only new issues if it's a pull request
           args: --timeout 4m # the default of 1m didn't suffice occasionally

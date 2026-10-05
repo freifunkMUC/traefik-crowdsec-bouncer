@@ -1,9 +1,15 @@
-name: Build Docker image
+name: Docker image
 
+# Builds the image for every pull request, and publishes it from main and from
+# release tags. One workflow for both, so that what is published is what was
+# built, smoke-tested and scanned here.
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
+    tags:
+      - "v*.*.*"
   pull_request:
 
 env:
@@ -17,37 +23,43 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      security-events: write
+      # to push the image
+      packages: write
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
-
+      # no QEMU: the Dockerfile cross-compiles, nothing runs on the target
+      # platform during the build
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         with:
           buildkitd-config: .github/buildkitd.toml
 
       - name: Retrieve author data
         id: author
         run: |
-          AUTHOR=$(curl -sSL ${{ github.event.repository.owner.url }} | jq -r '.name')
-          echo "AUTHOR=$AUTHOR" >> $GITHUB_ENV
+          AUTHOR=$(curl -sSL "${{ github.event.repository.owner.url }}" | jq -r '.name')
+          echo "AUTHOR=$AUTHOR" >> "$GITHUB_ENV"
 
+      # main -> :main, v1.2.3 -> :v1.2.3 and :latest
       - name: Extract metadata (tags, labels) for Docker
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=sha,prefix=sha-
           labels: |
             org.opencontainers.image.authors=${{ env.AUTHOR }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.created=${{ steps.meta.outputs.created }}
 
-      - name: Build Docker image
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+      # for the checks below; the multi-platform build cannot be loaded into
+      # the local docker, and its layers come from this build's cache
+      - name: Build the image for this machine
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           platforms: linux/amd64
@@ -61,23 +73,56 @@ jobs:
             VERSION=${{ github.head_ref || github.ref_name }}
             COMMIT=${{ github.sha }}
 
-      - name: Inspect Docker image
-        run: docker image inspect ${{ steps.meta.outputs.tags }}
+      # The unit tests run the code from the checkout; this runs the image.
+      # There is no CrowdSec here, so the LAPI address points nowhere: the
+      # bouncer has to come up regardless, and has to refuse a request it
+      # cannot check rather than let it through.
+      - name: Smoke-test the image
+        env:
+          IMAGE: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
+        run: |
+          docker run -d --name smoke -p 8080:8080 \
+            -e CROWDSEC_BOUNCER_API_KEY=smoke-test \
+            -e CROWDSEC_AGENT_HOST=127.0.0.1:1 \
+            "$IMAGE"
+          trap 'docker logs smoke; docker rm -f smoke >/dev/null' EXIT
+          for _ in $(seq 30); do curl -sf http://localhost:8080/api/v1/ping >/dev/null && break; sleep 1; done
 
-      - name: Pick a single image tag to scan
-        id: scan_tag
-        run: echo "tag=$(head -n1 <<< '${{ steps.meta.outputs.tags }}')" >> "$GITHUB_OUTPUT"
+          test "$(curl -sf http://localhost:8080/api/v1/ping)" = pong
+          curl -sf http://localhost:8080/api/v1/metrics | grep -q '^crowdsec_traefik_bouncer_'
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Real-Ip: 192.0.2.1' http://localhost:8080/api/v1/forwardAuth)" = 403
 
-      - name: Scan image for known vulnerabilities
+      # before anything is published: the Go binaries in the image. Only what
+      # already has a fix fails the build - that can be dealt with here,
+      # usually by updating a dependency or the Go version.
+      - name: Scan the image with Trivy
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: ${{ steps.scan_tag.outputs.tag }}
-          format: sarif
-          output: trivy-results.sarif
-          severity: CRITICAL,HIGH
+          image-ref: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
 
-      - name: Upload Trivy scan results
-        uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd #v4.37.7
-        if: always()
+      - name: Login to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
-          sarif_file: trivy-results.sarif
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push every published platform
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64/v8,linux/arm/v7,linux/ppc64le,linux/s390x
+          push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ github.head_ref || github.ref_name }}
+            COMMIT=${{ github.sha }}

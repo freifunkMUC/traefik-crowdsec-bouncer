@@ -1,0 +1,14 @@
+# Docs: <https://github.com/gitleaks/gitleaks#configuration>
+title = "Gitleaks configuration"
+
+[extend]
+# the default rules: https://github.com/gitleaks/gitleaks/blob/master/config/gitleaks.toml
+useDefault = true
+
+[[allowlists]]
+# The bouncer key of a throwaway local CrowdSec from the upstream project's
+# early days (2021), committed in .env, _test.env, main.go and the compose
+# file back then. It was never valid anywhere else; this keeps the history scan
+# from failing on it.
+description = "upstream 2021 local development key"
+regexes = ['''^40796d93c2958f9e58345514e67740e5$''']

@@ -1,0 +1,50 @@
+name: Trivy
+
+# The published image, once a week: a vulnerability can become known in a
+# package of the image while nothing in the repository changes.
+
+on:
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # to report the findings in the repository's code scanning
+      security-events: write
+    steps:
+      # An image reference has to be lower case, and github.repository keeps
+      # the owner's spelling - "freifunkMUC".
+      - name: The image to scan
+        id: image
+        run: echo "ref=ghcr.io/${GITHUB_REPOSITORY,,}:latest" >> "$GITHUB_OUTPUT"
+
+      - name: Report every finding to code scanning
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.image.outputs.ref }}
+          format: sarif
+          output: trivy.sarif
+
+      - name: Upload to code scanning
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: trivy.sarif
+          category: trivy-image
+
+      # fails the run - and so notifies the maintainers - for what can be fixed
+      - name: Fail on fixable high and critical findings
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.image.outputs.ref }}
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          skip-setup-trivy: true

@@ -1,6 +1,11 @@
-# Building custom health checker
-FROM golang:1.27.1-trixie@sha256:9baa6b4187bbb98d240372a8a235ac0bb6b5ddd52bba1431dc2f7c0705862728 AS health-build-env
+# Both Go stages run on the build machine and cross-compile for the target
+# platform: the binaries are static (CGO_ENABLED=0), so nothing in them needs
+# the target's userland, and building under QEMU took the multi-platform
+# publish the better part of an hour.
 
+# Building custom health checker
+FROM --platform=$BUILDPLATFORM golang:1.27.1-trixie@sha256:3b77fc618ec235a1ab412de7737f120dd507c57e8d87de4cbb7994fb94275ed5 AS health-build-env
+ARG TARGETOS TARGETARCH TARGETVARIANT
 
 # Copying source
 WORKDIR /go/src/app
@@ -8,12 +13,13 @@ COPY ./healthcheck/go.mod ./healthcheck/go.sum* ./
 RUN go mod download
 COPY ./healthcheck /go/src/app
 
-# Compiling
-RUN CGO_ENABLED=0 go build -o /go/bin/healthchecker
+# Compiling; GOARM is only read for 32-bit arm, where the variant is v7
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH GOARM=${TARGETVARIANT#v} \
+    go build -o /go/bin/healthchecker
 
 # Building bouncer
-FROM golang:1.27.1-trixie@sha256:9baa6b4187bbb98d240372a8a235ac0bb6b5ddd52bba1431dc2f7c0705862728 AS build-env
-
+FROM --platform=$BUILDPLATFORM golang:1.27.1-trixie@sha256:3b77fc618ec235a1ab412de7737f120dd507c57e8d87de4cbb7994fb94275ed5 AS build-env
+ARG TARGETOS TARGETARCH TARGETVARIANT
 
 # Copying source
 WORKDIR /go/src/app
@@ -22,9 +28,10 @@ RUN go mod download
 COPY . /go/src/app
 
 # Compiling
-RUN CGO_ENABLED=0 go build -o /go/bin/app
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH GOARM=${TARGETVARIANT#v} \
+    go build -o /go/bin/app
 
-FROM gcr.io/distroless/static:nonroot@sha256:1c2c046bc09ed40fad370b599a0b1ae7987f55b01e247cf27a7c27cd97e5bbc7
+FROM gcr.io/distroless/static:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3
 COPY --from=health-build-env --chown=nonroot:nonroot /go/bin/healthchecker /
 COPY --from=build-env --chown=nonroot:nonroot /go/bin/app /
 
