@@ -21,6 +21,11 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Shared with rebuild.yml: two publishes of one ref must not overtake each
+    # other. Pull requests get a group of their own.
+    concurrency:
+      group: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.run_id) || format('publish-{0}', github.ref) }}
+      cancel-in-progress: false
     permissions:
       contents: read
       # to push the image
@@ -39,7 +44,7 @@ jobs:
       - name: Retrieve author data
         id: author
         run: |
-          AUTHOR=$(curl -sSL "${{ github.event.repository.owner.url }}" | jq -r '.name')
+          AUTHOR=$(curl -fsSL "${{ github.event.repository.owner.url }}" | jq -r '.name')
           echo "AUTHOR=$AUTHOR" >> "$GITHUB_ENV"
 
       # the base images, for the labels below: the daily rebuild compares them

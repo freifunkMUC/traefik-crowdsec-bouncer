@@ -37,6 +37,10 @@ jobs:
   rebuild:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    # The group of build.yml's publishes of main: they queue behind each other.
+    concurrency:
+      group: publish-refs/heads/main
+      cancel-in-progress: false
     permissions:
       contents: read
       # to pull and push the image
@@ -70,7 +74,7 @@ jobs:
       - name: Retrieve author data
         if: steps.decide.outputs.push == 'true'
         run: |
-          AUTHOR=$(curl -sSL "https://api.github.com/users/${{ github.repository_owner }}" | jq -r '.name')
+          AUTHOR=$(curl -fsSL "https://api.github.com/users/${{ github.repository_owner }}" | jq -r '.name')
           echo "AUTHOR=$AUTHOR" >> "$GITHUB_ENV"
 
       # no QEMU: the Dockerfile cross-compiles, nothing runs on the target
@@ -81,7 +85,9 @@ jobs:
         with:
           buildkitd-config: .github/buildkitd.toml
 
-      # No cache: a cached layer would carry the old Go build.
+      # No cache for this build: a cached layer would carry the old Go build.
+      # Its layers go into the cache for the push below, so what is scanned is
+      # what is published; the base images are pinned by digest.
       - name: Build the image for this machine
         if: steps.decide.outputs.push == 'true'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -91,6 +97,7 @@ jobs:
           push: false
           load: true
           no-cache: true
+          cache-to: type=gha,mode=max
           tags: rebuild:test
 
       - name: Smoke-test the image
@@ -167,6 +174,6 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64/v8,linux/arm/v7,linux/ppc64le,linux/s390x
           push: true
-          no-cache: true
+          cache-from: type=gha
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
