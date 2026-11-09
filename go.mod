@@ -1,6 +1,6 @@
 module github.com/fbonalair/traefik-crowdsec-bouncer
 
-go 1.27.3
+go 1.26.10
 
 require (
 	github.com/gin-contrib/logger v1.2.11
