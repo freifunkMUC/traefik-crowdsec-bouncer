@@ -42,6 +42,12 @@ jobs:
           AUTHOR=$(curl -sSL "${{ github.event.repository.owner.url }}" | jq -r '.name')
           echo "AUTHOR=$AUTHOR" >> "$GITHUB_ENV"
 
+      # the base images, for the labels below: the daily rebuild compares them
+      # with the Dockerfile
+      - name: Base images
+        id: base
+        run: .github/base-image.sh >> "$GITHUB_OUTPUT"
+
       # main -> :main, v1.2.3 -> :v1.2.3 and :latest
       - name: Extract metadata (tags, labels) for Docker
         id: meta
@@ -55,6 +61,9 @@ jobs:
           labels: |
             org.opencontainers.image.authors=${{ env.AUTHOR }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.base.name=${{ steps.base.outputs.base_name }}
+            org.opencontainers.image.base.digest=${{ steps.base.outputs.base_digest }}
+            io.github.freifunkmuc.build-base-digests=${{ steps.base.outputs.build_digests }}
 
       # for the checks below; the multi-platform build cannot be loaded into
       # the local docker, and its layers come from this build's cache
@@ -74,23 +83,10 @@ jobs:
             COMMIT=${{ github.sha }}
 
       # The unit tests run the code from the checkout; this runs the image.
-      # There is no CrowdSec here, so the LAPI address points nowhere: the
-      # bouncer has to come up regardless, and has to refuse a request it
-      # cannot check rather than let it through.
       - name: Smoke-test the image
         env:
           IMAGE: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
-        run: |
-          docker run -d --name smoke -p 8080:8080 \
-            -e CROWDSEC_BOUNCER_API_KEY=smoke-test \
-            -e CROWDSEC_AGENT_HOST=127.0.0.1:1 \
-            "$IMAGE"
-          trap 'docker logs smoke; docker rm -f smoke >/dev/null' EXIT
-          for _ in $(seq 30); do curl -sf http://localhost:8080/api/v1/ping >/dev/null && break; sleep 1; done
-
-          test "$(curl -sf http://localhost:8080/api/v1/ping)" = pong
-          curl -sf http://localhost:8080/api/v1/metrics | grep -q '^crowdsec_traefik_bouncer_'
-          test "$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Real-Ip: 192.0.2.1' http://localhost:8080/api/v1/forwardAuth)" = 403
+        run: .github/smoke.sh "$IMAGE"
 
       # before anything is published: the Go binaries in the image. Only what
       # already has a fix fails the build - that can be dealt with here,

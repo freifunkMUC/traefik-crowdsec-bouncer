@@ -1,0 +1,172 @@
+name: Daily rebuild
+
+# Rebuilds the image from main every day without cache, but publishes it only
+# if it was built from other base images (final image or Go build image) than
+# the Dockerfile pins now. Otherwise the digests of the published tags stay as
+# they are. The pins move through pull requests and publish via build.yml; this
+# catches a publish that did not happen. A rebuild adds an unchanged
+# main-rN tag, and the moving main tag follows. Releases are not rebuilt: their
+# Dockerfile pins the base images, so a new release carries new ones.
+
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Rebuild and publish even if nothing changed
+        required: false
+        type: boolean
+        default: false
+  schedule:
+    # Not at minute 0: GitHub delays or drops scheduled runs at the start of
+    # the hour.
+    - cron: "23 4 * * *"
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+permissions:
+  contents: read
+
+# Two runs probing the same -rN would overwrite each other's tag.
+concurrency:
+  group: rebuild
+  cancel-in-progress: false
+
+jobs:
+  rebuild:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # to pull and push the image
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Base images
+        id: base
+        run: .github/base-image.sh >> "$GITHUB_OUTPUT"
+
+      - name: Decide
+        id: decide
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          FORCE: ${{ inputs.force }}
+          BASE_DIGEST: ${{ steps.base.outputs.base_digest }}
+          BUILD_DIGESTS: ${{ steps.base.outputs.build_digests }}
+        run: |
+          test -n "$BASE_DIGEST" || { echo "FROM is not pinned by digest" >&2; exit 1; }
+          .github/should-rebuild.sh "${IMAGE,,}:main" "$BASE_DIGEST" "$BUILD_DIGESTS" | tee -a "$GITHUB_OUTPUT"
+
+      - name: Retrieve author data
+        if: steps.decide.outputs.push == 'true'
+        run: |
+          AUTHOR=$(curl -sSL "https://api.github.com/users/${{ github.repository_owner }}" | jq -r '.name')
+          echo "AUTHOR=$AUTHOR" >> "$GITHUB_ENV"
+
+      # no QEMU: the Dockerfile cross-compiles, nothing runs on the target
+      # platform during the build
+      - name: Set up Docker Buildx
+        if: steps.decide.outputs.push == 'true'
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          buildkitd-config: .github/buildkitd.toml
+
+      # No cache: a cached layer would carry the old Go build.
+      - name: Build the image for this machine
+        if: steps.decide.outputs.push == 'true'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          load: true
+          no-cache: true
+          tags: rebuild:test
+
+      - name: Smoke-test the image
+        if: steps.decide.outputs.push == 'true'
+        run: .github/smoke.sh rebuild:test
+
+      - name: Scan the image with Trivy
+        if: steps.decide.outputs.push == 'true'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: rebuild:test
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      # A merge to main publishes while this run builds: do not move main back
+      # to an older commit. The next run starts from the new one.
+      - name: Still the head of main
+        id: head
+        if: steps.decide.outputs.push == 'true'
+        run: |
+          if [ "$(git ls-remote origin refs/heads/main | cut -f1)" = "$(git rev-parse HEAD)" ]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "main moved on; not publishing" >&2
+            echo "current=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The first unused main-rN, found by asking the registry. Only a "not
+      # found" answer means the tag is free; any other error fails the job
+      # rather than risk overwriting an immutable tag.
+      - name: Rebuild number
+        id: rebuild
+        if: steps.head.outputs.current == 'true'
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        run: |
+          IMAGE="${IMAGE,,}"  # registry names are lowercase
+          n=1
+          while true; do
+            if out=$(docker buildx imagetools inspect "$IMAGE:main-r$n" 2>&1); then
+              n=$((n + 1))
+            elif grep -qiE 'not found|manifest unknown' <<< "$out"; then
+              break
+            else
+              echo "Cannot probe $IMAGE:main-r$n: $out" >&2
+              exit 1
+            fi
+          done
+          echo "n=$n" >> "$GITHUB_OUTPUT"
+
+      # main moves with every rebuild; main-rN stays.
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        if: steps.head.outputs.current == 'true'
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=main
+            type=raw,value=main-r${{ steps.rebuild.outputs.n }}
+          labels: |
+            org.opencontainers.image.authors=${{ env.AUTHOR }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.base.name=${{ steps.base.outputs.base_name }}
+            org.opencontainers.image.base.digest=${{ steps.base.outputs.base_digest }}
+            io.github.freifunkmuc.build-base-digests=${{ steps.base.outputs.build_digests }}
+
+      - name: Build and push every published platform
+        if: steps.head.outputs.current == 'true'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64/v8,linux/arm/v7,linux/ppc64le,linux/s390x
+          push: true
+          no-cache: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
