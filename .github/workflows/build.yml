@@ -130,7 +130,8 @@ jobs:
           build-args: |
             VERSION=${{ github.head_ref || github.ref_name }}
             COMMIT=${{ github.sha }}
-          provenance: false
+          provenance: mode=max
+          sbom: true
 
       - name: Image name
         id: image
