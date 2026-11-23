@@ -5,8 +5,9 @@ name: Daily rebuild
 # the Dockerfile pins now. Otherwise the digests of the published tags stay as
 # they are. The pins move through pull requests and publish via build.yml; this
 # catches a publish that did not happen. A rebuild adds an unchanged
-# main-rN tag, and the moving main tag follows. Releases are not rebuilt: their
-# Dockerfile pins the base images, so a new release carries new ones.
+# main-rN tag, and the moving main tag follows. Published images carry BuildKit
+# provenance and an SBOM next to the signed attestation. Releases are not
+# rebuilt: their Dockerfile pins the base images, so a new release carries new ones.
 
 on:
   workflow_dispatch:
@@ -180,7 +181,8 @@ jobs:
           cache-from: type=gha
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          provenance: false
+          provenance: mode=max
+          sbom: true
 
       - name: Image name
         id: image
